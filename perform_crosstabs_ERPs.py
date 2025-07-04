@@ -1,0 +1,801 @@
+import pandas as pd
+import json
+import re
+
+# Show all columns and full width when printing DataFrames
+pd.set_option("display.max_columns", None)
+pd.set_option("display.width", None)
+pd.set_option("display.max_colwidth", None)
+
+# === PARAMETERS ===
+adm0_iso3 = "COD"
+round_num = 9
+group_indicators = {
+    "fies_resid": "hh_residencetype",
+    "fies_hhtype": "hh_agricactivity",
+    "agriculture": "hh_residencetype"
+}
+export_csv = True
+
+# === LOAD INDICATOR METADATA ===
+with open("indicators_metadata.js", "r", encoding="utf-8") as f:
+    js_text = f.read()
+js_clean = re.sub(r"^window\.indicatorData\s*=\s*", "", js_text.strip())
+if js_clean.endswith(";"):
+    js_clean = js_clean[:-1]
+indicator_data = json.loads(js_clean)
+
+def get_indicator_info(indicator_name):
+    if indicator_name not in indicator_data:
+        raise ValueError(f"Indicator '{indicator_name}' not found in metadata")
+    return {
+        "title": indicator_data[indicator_name].get("title", indicator_name),
+        "codes": indicator_data[indicator_name]["codes"]
+    }
+
+# === LOAD CSV ===
+
+csv_path = r"C:\git\crossview_processing\DIEM_micro20250703_CODR89.csv"
+df_all = pd.read_csv(csv_path)
+
+# Filter for current round only
+df = df_all[(df_all["adm0_iso3"] == adm0_iso3) & (df_all["round"] == round_num)]
+print(f"Fetched {len(df)} records for round {round_num}.")
+
+
+def fies_by_indicator_old(indicator_key, df):
+    fies_fields = {
+        "p_mod": "% moderate/severe (p_mod)",
+        "p_sev": "% severe only (p_sev)"
+    }
+    fies_rows = []
+    indicator = group_indicators[indicator_key]
+    info = get_indicator_info(indicator)
+    title = info["title"]
+    codes = info["codes"]
+
+    for code, label in codes.items():
+        group_df = df[df[indicator].astype(str) == code]
+        if len(group_df) == 0:
+            continue
+        print(f"Processing FIES for group '{label}' ({len(group_df)} records)...")
+
+        row_data = {}
+        for field, label_field in fies_fields.items():
+            weighted_sum = 0.0
+            total_weight = 0.0
+            for _, row in group_df.iterrows():
+                try:
+                    w = float(row.get("weight_final", 0))
+                    val = float(row.get(field, 0))
+                    if w > 0 and pd.notna(val):
+                        weighted_sum += w * val
+                        total_weight += w
+                except:
+                    continue
+            row_data[label_field] = round((weighted_sum / total_weight) * 100, 1) if total_weight > 0 else 0.0
+        row_data[title] = label
+        fies_rows.append(row_data)
+
+    fies_df = pd.DataFrame(fies_rows).set_index(title)
+    total_row = {}
+    for field, label_field in fies_fields.items():
+        weighted_sum = 0.0
+        total_weight = 0.0
+        for _, row in df.iterrows():
+            try:
+                w = float(row.get("weight_final", 0))
+                val = float(row.get(field, 0))
+                if w > 0 and pd.notna(val):
+                    weighted_sum += w * val
+                    total_weight += w
+            except:
+                continue
+        total_row[label_field] = round((weighted_sum / total_weight) * 100, 1) if total_weight > 0 else 0.0
+    fies_df.loc["TOTAL"] = pd.Series(total_row)
+    return {
+        "title": f"FIES: Prevalence of food insecurity (% of HH) by {title}",
+        "df": fies_df
+    }
+
+def fies_by_indicator(indicator_key, df, universe_label=None):
+    fies_fields = {
+        "p_mod": "% moderate/severe (p_mod)",
+        "p_sev": "% severe only (p_sev)"
+    }
+    fies_rows = []
+    indicator = group_indicators[indicator_key]
+    info = get_indicator_info(indicator)
+    title = info["title"]
+    codes = info["codes"]
+
+    # Generate the descriptive title
+    if universe_label is None:
+        universe_label = "all households"
+    subtitle = f"FIES weighted average by {title} — Universe: {universe_label}"
+
+    print(subtitle)
+
+    for code, label in codes.items():
+        try:
+            group_df = df[df[indicator].astype("Int64") == int(code)]
+        except ValueError:
+            group_df = df[df[indicator].astype(str) == str(code)]
+
+        if len(group_df) == 0:
+            continue
+        print(f"Processing FIES for group '{label}' ({len(group_df)} records)...")
+
+        row_data = {}
+        for field, label_field in fies_fields.items():
+            weighted_sum = 0.0
+            total_weight = 0.0
+            for _, row in group_df.iterrows():
+                try:
+                    w = float(row.get("weight_final", 0))
+                    val = float(row.get(field, 0))
+                    if w > 0 and pd.notna(val):
+                        weighted_sum += w * val
+                        total_weight += w
+                except:
+                    continue
+            row_data[label_field] = round((weighted_sum / total_weight) * 100, 1) if total_weight > 0 else 0.0
+        row_data[title] = label
+        fies_rows.append(row_data)
+
+    fies_df = pd.DataFrame(fies_rows).set_index(title)
+
+    # TOTAL row calculation
+    total_row = {}
+    for field, label_field in fies_fields.items():
+        weighted_sum = 0.0
+        total_weight = 0.0
+        for _, row in df.iterrows():
+            try:
+                w = float(row.get("weight_final", 0))
+                val = float(row.get(field, 0))
+                if w > 0 and pd.notna(val):
+                    weighted_sum += w * val
+                    total_weight += w
+            except:
+                continue
+        total_row[label_field] = round((weighted_sum / total_weight) * 100, 1) if total_weight > 0 else 0.0
+    fies_df.loc["TOTAL"] = pd.Series(total_row)
+
+    return {
+        "title": f"FIES: Prevalence of food insecurity (% of HH) by {title}",
+        "subtitle": subtitle,
+        "df": fies_df
+    }
+
+def fies_by_simplified_agriculture(df):
+    df = df.copy()
+    df.loc[:, "agriculture_group"] = df["hh_agricactivity"].apply(lambda x: (
+        "Agricultural HH" if int(x) in [1, 2, 3] else
+        "Non-agricultural HH" if int(x) == 4 else
+        "Don't know" if int(x) == 888 else
+        "Refused" if int(x) == 999 else None
+    ) if pd.notna(x) else None)
+
+    fies_fields = {
+        "p_mod": "% moderate/severe (p_mod)",
+        "p_sev": "% severe only (p_sev)"
+    }
+    rows = []
+    for group in df["agriculture_group"].dropna().unique():
+        group_df = df[df["agriculture_group"] == group]
+        if len(group_df) == 0:
+            continue
+        print(f"Processing FIES by AGRI GROUP '{group}' ({len(group_df)} records)...")
+        row_data = {}
+        for field, label_field in fies_fields.items():
+            weighted_sum = 0.0
+            total_weight = 0.0
+            for _, row in group_df.iterrows():
+                try:
+                    w = float(row.get("weight_final", 0))
+                    val = float(row.get(field, 0))
+                    if w > 0 and pd.notna(val):
+                        weighted_sum += w * val
+                        total_weight += w
+                except:
+                    continue
+            row_data[label_field] = round((weighted_sum / total_weight) * 100, 1) if total_weight > 0 else 0.0
+        row_data["Agriculture group"] = group
+        rows.append(row_data)
+
+    fies_df = pd.DataFrame(rows).set_index("Agriculture group")
+
+    total_row = {}
+    for field, label_field in fies_fields.items():
+        weighted_sum = 0.0
+        total_weight = 0.0
+        for _, row in df.iterrows():
+            try:
+                w = float(row.get("weight_final", 0))
+                val = float(row.get(field, 0))
+                if w > 0 and pd.notna(val):
+                    weighted_sum += w * val
+                    total_weight += w
+            except:
+                continue
+        total_row[label_field] = round((weighted_sum / total_weight) * 100, 1) if total_weight > 0 else 0.0
+    fies_df.loc["TOTAL"] = pd.Series(total_row)
+    return {
+        "title": "FIES: Prevalence of food insecurity by simplified agri group (% of HH)",
+        "df": fies_df
+    }
+
+def agricultural_dependency(df):
+    agriculture_categories = {
+        1: "Yes - crop production",
+        2: "Yes - livestock production",
+        3: "Yes - both crop and livestock production",
+        4: "No",
+        888: "Don't know",
+        999: "Refused"
+    }
+    agriculture_keys = list(agriculture_categories.keys())
+    agri_indicator = group_indicators["agriculture"]
+    agri_info = get_indicator_info(agri_indicator)
+    agri_title = agri_info["title"]
+    agri_codes = agri_info["codes"]
+    rows = []
+
+    for code, label in agri_codes.items():
+        try:
+            group_df = df[df[agri_indicator].astype("Int64") == int(code)]
+        except ValueError:
+            group_df = df[df[agri_indicator].astype(str) == str(code)]
+
+        if len(group_df) == 0:
+            continue
+        print(f"Processing AGRICULTURE for group '{label}' ({len(group_df)} records)...")
+        weighted_counts = {k: 0.0 for k in agriculture_keys}
+        total_weight = 0.0
+        for _, row in group_df.iterrows():
+            try:
+                w = float(row.get("weight_final"))
+                val = int(row.get("hh_agricactivity"))
+                if w > 0 and val in agriculture_keys:
+                    weighted_counts[val] += w
+                    total_weight += w
+            except:
+                continue
+        row_data = {
+            agriculture_categories[k]: (weighted_counts[k] / total_weight * 100 if total_weight > 0 else 0.0)
+            for k in agriculture_keys
+        }
+        row_data[agri_title] = label
+        rows.append(row_data)
+
+    df_result = pd.DataFrame(rows).set_index(agri_title).round(1)
+
+    # TOTAL
+    total_counts = {k: 0.0 for k in agriculture_keys}
+    total_weight = 0.0
+    for _, row in df.iterrows():
+        try:
+            w = float(row.get("weight_final"))
+            val = int(row.get("hh_agricactivity"))
+            if w > 0 and val in agriculture_keys:
+                total_counts[val] += w
+                total_weight += w
+        except:
+            continue
+    total_row = {
+        agriculture_categories[k]: (total_counts[k] / total_weight * 100 if total_weight > 0 else 0.0)
+        for k in agriculture_keys
+    }
+    df_result.loc["TOTAL"] = pd.Series(total_row).round(1)
+
+    return {
+        "title": "Agricultural dependency by residency status (% of HH)",
+        "df": df_result
+    }
+
+
+def simplified_dependency_by_residency(df):
+    df = df.copy()
+    df.loc[:, "agri_simple"] = df["hh_agricactivity"].apply(lambda x: (
+
+        "Agricultural HH" if int(x) in [1, 2, 3] else
+        "Non-agricultural HH" if int(x) == 4 else None
+    ) if pd.notna(x) else None)
+
+    agri_indicator = group_indicators["fies_resid"]
+    resid_info = get_indicator_info(agri_indicator)
+    resid_title = resid_info["title"]
+    resid_codes = resid_info["codes"]
+    rows = []
+
+    for code, label in resid_codes.items():
+        try:
+            group_df = df[df[agri_indicator].astype("Int64") == int(code)]
+        except ValueError:
+            group_df = df[df[agri_indicator].astype(str) == str(code)]
+        #group_df = df[df[agri_indicator].astype(str) == code]
+        if len(group_df) == 0:
+            continue
+        print(f"Processing SIMPLIFIED AGRIC DEPENDENCY for residency group '{label}' ({len(group_df)} records)...")
+        weighted_counts = {"Agricultural HH": 0.0, "Non-agricultural HH": 0.0}
+        total_weight = 0.0
+        for _, row in group_df.iterrows():
+            group = row.get("agri_simple")
+            try:
+                w = float(row.get("weight_final", 0))
+                if w > 0 and group in weighted_counts:
+                    weighted_counts[group] += w
+                    total_weight += w
+            except:
+                continue
+        row_data = {
+            "Agricultural HH": (weighted_counts["Agricultural HH"] / total_weight * 100 if total_weight > 0 else 0.0),
+            "Non-agricultural HH": (weighted_counts["Non-agricultural HH"] / total_weight * 100 if total_weight > 0 else 0.0),
+            resid_title: label
+        }
+        rows.append(row_data)
+
+    df_result = pd.DataFrame(rows).set_index(resid_title).round(1)
+
+    # TOTAL
+    total_counts = {"Agricultural HH": 0.0, "Non-agricultural HH": 0.0}
+    total_weight = 0.0
+    for _, row in df.iterrows():
+        group = row.get("agri_simple")
+        try:
+            w = float(row.get("weight_final", 0))
+            if w > 0 and group in total_counts:
+                total_counts[group] += w
+                total_weight += w
+        except:
+            continue
+    total_row = {
+        "Agricultural HH": (total_counts["Agricultural HH"] / total_weight * 100 if total_weight > 0 else 0.0),
+        "Non-agricultural HH": (total_counts["Non-agricultural HH"] / total_weight * 100 if total_weight > 0 else 0.0)
+    }
+    df_result.loc["TOTAL"] = pd.Series(total_row).round(1)
+
+    return {
+        "title": "Simplified agricultural dependency by residency status (% of HH)",
+        "df": df_result
+    }
+
+
+def needs_summary_grouped(df_all, adm0_iso3, round_num, use_grouping=True, use_previous_round=True, universe_filter=[1]):
+    import collections
+
+    # Choose round (current or previous)
+    selected_round = round_num - 1 if use_previous_round else round_num
+
+    # Filter to selected round, country, and universe
+    df_universe = df_all[
+        (df_all["adm0_iso3"] == adm0_iso3) &
+        (df_all["round"] == selected_round) &
+        (df_all["need"].isin(universe_filter))
+    ].copy()
+
+    universe_count = len(df_universe)
+
+    # Total weight
+    total_weight = df_universe["weight_final"].apply(pd.to_numeric, errors="coerce").dropna()
+    total_weight = total_weight[total_weight > 0].sum()
+
+    # Reclassification
+    need_fields_dict = {
+        "need_food": "need_food",
+        "need_cash": "need_cash",
+        "need_other": "need_other",
+        "need_dk": "need_dk",
+        "need_ref": "need_ref",
+        "need_vouchers_fair": "agricultural livelihoods",
+        "need_crop_inputs": "agricultural livelihoods",
+        "need_crop_infrastructure": "agricultural livelihoods",
+        "need_crop_knowledge": "agricultural livelihoods",
+        "need_ls_feed": "agricultural livelihoods",
+        "need_ls_vet_service": "agricultural livelihoods",
+        "need_ls_infrastructure": "agricultural livelihoods",
+        "need_ls_knowledge": "agricultural livelihoods",
+        "need_fish_inputs": "agricultural livelihoods",
+        "need_fish_infrastructure": "agricultural livelihoods",
+        "need_fish_knowledge": "agricultural livelihoods",
+        "need_env_infra_rehab": "agricultural livelihoods",
+        "need_cold_storage": "agricultural livelihoods",
+        "need_marketing_supp": "agricultural livelihoods"
+    }
+
+    # Grouping logic
+    if use_grouping:
+        from collections import defaultdict
+        group_fields = defaultdict(list)
+        for field, group in need_fields_dict.items():
+            group_fields[group].append(field)
+    else:
+        all_fields = list(need_fields_dict.keys())
+        group_fields = {field: [field] for field in all_fields}
+
+    # Initialize group sums
+    group_weight_sums = {group: 0.0 for group in group_fields}
+
+    for _, row in df_universe.iterrows():
+        try:
+            w = float(row.get("weight_final", 0))
+            if not w > 0:
+                continue
+        except:
+            continue
+
+        for group, fields in group_fields.items():
+            for field in fields:
+                val = row.get(field)
+                if val in [1, "1", True]:
+                    group_weight_sums[group] += w
+                    break  # Only once per group
+
+    # Format output
+    results = []
+    for group, w_sum in group_weight_sums.items():
+        pct = (w_sum / total_weight * 100) if total_weight > 0 else 0.0
+        label = group.replace("need_", "").replace("_", " ").capitalize()
+        results.append({
+            "Need group": label,
+            "Weighted % of HH": round(pct, 1)
+        })
+
+    df_result = pd.DataFrame(results).set_index("Need group")
+
+    # Dynamic title
+    title = (
+        f"Needs reported in previous round\n"
+        f"Round: {selected_round}, Country: {adm0_iso3.upper()}, Universe: need in {universe_filter}"
+    )
+
+    return {
+        "title": "Needs reported in previous round",
+        "metadata": f"Round: {selected_round}, Country: {adm0_iso3.upper()}, Universe: need in {universe_filter}",
+        "df": df_result
+    }
+
+
+def assistance_summary(df, use_grouping=True, universe_filter=[1], round_num=None, adm0_iso3=None):
+    import collections
+
+    df_universe = df[df["need"].isin(universe_filter)].copy()
+    universe_count = len(df_universe)
+    total_weight = df_universe["weight_final"].apply(pd.to_numeric, errors="coerce").dropna()
+    total_weight = total_weight[total_weight > 0].sum()
+
+    assistance_provided_dict = {
+        "need_received_food": "need_received_food",
+        "need_received_cash": "need_received_cash",
+        "need_received_vouchers_fair": "agricultural livelihoods",
+        "need_received_crop_assist": "agricultural livelihoods",
+        "need_received_ls_assist": "agricultural livelihoods",
+        "need_received_fish_assist": "agricultural livelihoods",
+        "need_received_rehabilitation": "agricultural livelihoods",
+        "need_received_sales_support": "agricultural livelihoods",
+        "need_received_other": "need_received_other",
+        "need_received_none": "need_received_none",
+        "need_received_dk": "need_received_dk",
+        "need_received_ref": "need_received_ref"
+    }
+
+    if use_grouping:
+        group_fields = collections.defaultdict(list)
+        for field, group in assistance_provided_dict.items():
+            group_fields[group].append(field)
+    else:
+        all_fields = list(assistance_provided_dict.keys())
+        group_fields = {field: [field] for field in all_fields}
+
+    group_weight_sums = {group: 0.0 for group in group_fields.keys()}
+    for _, row in df_universe.iterrows():
+        try:
+            w = float(row.get("weight_final", 0))
+            if not w > 0:
+                continue
+        except:
+            continue
+        for group, fields in group_fields.items():
+            for field in fields:
+                val = row.get(field)
+                if val in [1, "1", True]:
+                    group_weight_sums[group] += w
+                    break
+
+    results = []
+    for group, w_sum in group_weight_sums.items():
+        pct = (w_sum / total_weight * 100) if total_weight > 0 else 0.0
+        if group == "need_received_food":
+            label = "Food"
+        elif group == "need_received_cash":
+            label = "Cash"
+        else:
+            label = group.replace("need_received_", "").replace("_", " ").capitalize()
+
+        results.append({
+            "Assistance type": label,
+            "Weighted % of HH": round(pct, 1)
+        })
+
+    df_result = pd.DataFrame(results).set_index("Assistance type")
+
+    # Compose detailed title
+    title = (
+        f"Assistance received in round {round_num}\n"
+        f"Country: {adm0_iso3.upper() if adm0_iso3 else 'N/A'}, Universe: need in {universe_filter}"
+    )
+
+    return {
+        "title": f"Assistance received in round {round_num}",
+        "metadata": f"Country: {adm0_iso3.upper() if adm0_iso3 else 'N/A'}, Universe: need in {universe_filter}",
+        "df": df_result
+    }
+
+def compare_needs_vs_assistance(needs_result, assistance_result):
+    # Extract and align dataframes
+    df_needs = needs_result["df"].copy()
+    df_assistance = assistance_result["df"].copy()
+
+    # Rename value columns and drop universe columns
+    df_needs = df_needs.rename(columns={
+        "Weighted % of HH": "Need in previous round (%)"
+    }).drop(columns=["Universe (n)"], errors="ignore")
+
+    df_assistance = df_assistance.rename(columns={
+        "Weighted % of HH": "Assistance received (%)"
+    }).drop(columns=["Universe (n)"], errors="ignore")
+
+    # Align indices
+    df_needs.index.name = "Type"
+    df_assistance.index.name = "Type"
+
+    # Join both tables
+    merged_df = df_needs.join(df_assistance, how="outer").fillna(0).round(1)
+
+    return {
+        "title": "Comparison: Needs in previous round vs Assistance received",
+        "metadata": f"Needs → Round {round_num - 1}, Assistance → Round {round_num}, Country: {adm0_iso3.upper()}, Universe: need in [0, 1, 888]",
+        "df": merged_df
+    }
+
+
+def assistance_quality_summary(df, group_by="need_received"):
+    from collections import defaultdict
+
+    # === Satisfaction categories ===
+    assistance_categories = {
+        1: "Yes",
+        2: "No - not received on time",
+        3: "No - did not meet my needs",
+        4: "No - quantity was not sufficient",
+        5: "No - problem with provider",
+        6: "No - malfunction of in-kind assistance",
+        888: "Don't know",
+        999: "Refused"
+    }
+
+    # === Grouping logic ===
+    if group_by == "need_received":
+        field_dict = {
+            "need_received_food": "need_received_food",
+            "need_received_cash": "need_received_cash",
+            "need_received_vouchers_fair": "agricultural livelihoods",
+            "need_received_crop_assist": "agricultural livelihoods",
+            "need_received_ls_assist": "agricultural livelihoods",
+            "need_received_fish_assist": "agricultural livelihoods",
+            "need_received_rehabilitation": "agricultural livelihoods",
+            "need_received_sales_support": "agricultural livelihoods",
+            "need_received_other": "need_received_other",
+            "need_received_none": "need_received_none",
+            "need_received_dk": "need_received_dk",
+            "need_received_ref": "need_received_ref"
+        }
+        group_label = "Received"
+    elif group_by == "need":
+        field_dict = {
+            "need_food": "need_food",
+            "need_cash": "need_cash",
+            "need_other": "need_other",
+            "need_dk": "need_dk",
+            "need_ref": "need_ref",
+            "need_vouchers_fair": "agricultural livelihoods",
+            "need_crop_inputs": "agricultural livelihoods",
+            "need_crop_infrastructure": "agricultural livelihoods",
+            "need_crop_knowledge": "agricultural livelihoods",
+            "need_ls_feed": "agricultural livelihoods",
+            "need_ls_vet_service": "agricultural livelihoods",
+            "need_ls_infrastructure": "agricultural livelihoods",
+            "need_ls_knowledge": "agricultural livelihoods",
+            "need_fish_inputs": "agricultural livelihoods",
+            "need_fish_infrastructure": "agricultural livelihoods",
+            "need_fish_knowledge": "agricultural livelihoods",
+            "need_env_infra_rehab": "agricultural livelihoods",
+            "need_cold_storage": "agricultural livelihoods",
+            "need_marketing_supp": "agricultural livelihoods"
+        }
+        group_label = "Need"
+    else:
+        raise ValueError("group_by must be either 'need_received' or 'need'")
+
+    group_fields = defaultdict(list)
+    for field, group in field_dict.items():
+        group_fields[group].append(field)
+
+    all_categories = list(assistance_categories.keys())
+    result_rows = []
+
+    for group, fields in group_fields.items():
+        group_df = df[df[fields].isin([1, "1", True]).any(axis=1)].copy()
+        if group_df.empty:
+            continue
+
+        print(f"Processing ASSISTANCE QUALITY for group '{group}' ({len(group_df)} records)...")
+
+        weighted_counts = {cat: 0.0 for cat in all_categories}
+        total_weight = 0.0
+
+        for _, row in group_df.iterrows():
+            try:
+                w = float(row.get("weight_final", 0))
+                val = int(row.get("assistance_quality"))
+                if w > 0 and val in weighted_counts:
+                    weighted_counts[val] += w
+                    total_weight += w
+            except:
+                continue
+
+        if total_weight == 0:
+            continue
+
+        row = {
+            f"{group_label} group": group.replace("need_received_", "").replace("need_", "").replace("_", " ").capitalize()
+        }
+        for cat in all_categories:
+            label = assistance_categories[cat]
+            row[label] = round((weighted_counts[cat] / total_weight) * 100, 1)
+
+        result_rows.append(row)
+
+    index_name = f"{group_label} group"
+    df_result = pd.DataFrame(result_rows).set_index(index_name).round(1)
+
+    title = f"Satisfaction with assistance by {group_label.lower()} group"
+    return {
+        "title": title,
+        "df": df_result
+    }
+
+
+# === MAIN EXECUTION ===
+result_dfs = []
+##FIES by residency status
+result_dfs.append(fies_by_indicator("fies_resid", df))
+# #FIES by agricultural dependancy
+result_dfs.append(fies_by_indicator("fies_hhtype", df))
+# #FIES by agricultural dependancy simplified
+result_dfs.append(fies_by_simplified_agriculture(df))
+# #agricultural dependancy by residency status
+result_dfs.append(agricultural_dependency(df))
+# #agricultural dependancy simplified by residency status
+result_dfs.append(simplified_dependency_by_residency(df))
+# # Needs summary grouped, using previous round, and custom universe
+needs_res = needs_summary_grouped(df_all, adm0_iso3, round_num,use_grouping=True, use_previous_round=True,universe_filter=[0, 1, 888])
+# # Assistance summary (grouped)
+assistance_res = assistance_summary(    df, use_grouping=True,universe_filter=[0, 1, 888],round_num=round_num,adm0_iso3=adm0_iso3)
+result_dfs.append(needs_res)
+result_dfs.append(assistance_res)
+# Append comparison
+result_dfs.append(compare_needs_vs_assistance(needs_res, assistance_res))
+
+# Grouped by received assistance type
+result_dfs.append(assistance_quality_summary(df, group_by="need_received"))
+
+# Grouped by type of need reported
+result_dfs.append(assistance_quality_summary(df, group_by="need"))
+
+
+# Print results
+for res in result_dfs:
+    print(f"\n=== {res['title']} ===")
+    if "metadata" in res:
+        print(res["metadata"])
+    print()
+    print(res["df"])
+
+if export_csv:
+    from openpyxl import Workbook
+    from openpyxl.utils.dataframe import dataframe_to_rows
+    from openpyxl.chart import BarChart, Reference
+    from openpyxl.styles import Font, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "DIEM Surveys analysis"
+
+    # Set wider column widths for A–E
+    for col in ["A", "B", "C", "D", "E"]:
+        ws.column_dimensions[col].width = 24
+
+    current_row = 1
+    label_max_len = 30   # Truncate chart labels beyond this length
+
+    thin_border = Border(
+        left=Side(style="thin"),
+        right=Side(style="thin"),
+        top=Side(style="thin"),
+        bottom=Side(style="thin")
+    )
+
+    def truncate_label(label, max_len):
+        return label if len(label) <= max_len else label[:max_len - 3] + "..."
+
+    # Add main title
+    ws.cell(row=current_row, column=1, value="DIEM surveys analysis for ERPs - July 2025")
+    ws.cell(row=current_row, column=1).font = Font(size=14, bold=True)
+    current_row += 2  # leave a blank row after main title
+
+    for i, result in enumerate(result_dfs):
+        if i > 0:
+            current_row += 15  # space between tables
+
+        # Title and metadata
+        if "title" in result:
+            ws.cell(row=current_row, column=1, value=result["title"])
+            ws.cell(row=current_row, column=1).font = Font(bold=True)
+            current_row += 1
+        if "metadata" in result:
+            ws.cell(row=current_row, column=1, value=result["metadata"])
+            current_row += 1
+
+        df = result["df"].reset_index()
+
+        # Create truncated label column for chart X-axis
+        chart_labels_col = df.columns[0] + "_short"
+        df[chart_labels_col] = df.iloc[:, 0].apply(lambda x: truncate_label(str(x), label_max_len))
+
+        start_row = current_row
+
+        # Write table (full-length labels)
+        table_cols = list(df.columns[:-1])  # exclude chart_labels_col
+        for row_idx, row in enumerate(dataframe_to_rows(df[table_cols], index=False, header=True)):
+            for col_idx, val in enumerate(row, 1):
+                cell = ws.cell(row=current_row, column=col_idx, value=val)
+                cell.border = thin_border
+            current_row += 1
+
+        # Write truncated labels far right in column AZ (col 52)
+        chart_label_col_idx = 52
+        ws.cell(row=start_row, column=chart_label_col_idx, value="Chart labels")
+        for r in range(df.shape[0]):
+            label_val = df.iloc[r, df.columns.get_loc(chart_labels_col)]
+            ws.cell(row=start_row + 1 + r, column=chart_label_col_idx, value=label_val)
+
+        # Create chart
+        num_cols = len(table_cols)
+        num_rows = df.shape[0]
+        if num_cols >= 2:
+            chart = BarChart()
+            chart.type = "col"
+            chart.title = "Chart: " + result["title"]
+            chart.y_axis.title = "Percentage"
+            chart.x_axis.title = df.columns[0]
+            chart.width = 18
+            chart.height = 9
+
+            data = Reference(ws, min_col=2, min_row=start_row, max_col=num_cols, max_row=start_row + num_rows)
+            categories = Reference(ws, min_col=chart_label_col_idx, min_row=start_row + 1, max_row=start_row + num_rows)
+
+            chart.add_data(data, titles_from_data=True)
+            chart.set_categories(categories)
+
+            # Place chart 2 columns after the last table column
+            chart_col = num_cols + 2
+            chart_col_letter = get_column_letter(chart_col)
+            chart_position = f"{chart_col_letter}{start_row}"
+            ws.add_chart(chart, chart_position)
+
+    output_path = f"DIEM_survey_analysis_ERPs_202507_{adm0_iso3}_{round_num}.xlsx"
+    wb.save(output_path)
+    print(f"\nExported grouped analysis with adaptive chart layout to: {output_path}")
