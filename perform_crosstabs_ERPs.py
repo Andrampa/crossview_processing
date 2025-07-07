@@ -1,24 +1,101 @@
 import pandas as pd
-import json
+import json, os
+from arcgis.gis import GIS
+from arcgis.features import FeatureLayer
+import pandas as pd
 import re
 
-# === Parameters ===
-survey_list = [
-    {"adm0_iso3": "COD", "round_num": 9},
-    {"adm0_iso3": "AFG", "round_num": 10},
-    {"adm0_iso3": "IRQ", "round_num": 13}
+
+######### get updated list of surveys to process ###########
+# Filter to keep only selected countries
+selected_countries = [
+    "AFG",  # Afghanistan
+    "BGD",  # Bangladesh
+    "BFA",  # Burkina Faso
+    "CMR",  # Cameroon
+    "CAF",  # Central African Republic (CAR)
+    "TCD",  # Chad
+    "COL",  # Colombia
+    "COD",  # Democratic Republic of the Congo (DRC)
+    "SLV",  # El Salvador
+    "GTM",  # Guatemala
+    "HTI",  # Haiti
+    "HND",  # Honduras
+    "LBN",  # Lebanon
+    "MLI",  # Mali
+    "MOZ",  # Mozambique
+    "MMR",  # Myanmar
+    "NER",  # Niger
+    "NGA",  # Nigeria
+    "PSE",  # West Bank (Palestine)
+    "YEM",  # Yemen
+    "IRQ",  # Iraq
+    "PAK",  # Pakistan
+    "MWI",  # Malawi
+    "ZWE"   # Zimbabwe
 ]
 
-#survey_list = [{"adm0_iso3": "IRQ", "round_num": 13}]
-survey_list = [{"adm0_iso3": "AFG", "round_num": 10}]
+# selected_countries = [
+#     "PAK"]
+
+get_updated_list_of_surveys_from_AGOL = True
+
+if get_updated_list_of_surveys_from_AGOL == False:
+    # survey_list =[{ 'adm0_iso3': 'AFG', 'adm0_name': 'Afghanistan', 'round_num': 10, 'coll_end_date': Timestamp('2024-07-10 00:00:00')},
+    #               { 'adm0_iso3': 'HTI', 'adm0_name': 'Haiti', 'round_num': 6, 'coll_end_date': Timestamp('2024-07-10 00:00:00')}]
+
+    survey_list =[
+    {
+        'adm0_iso3': 'MMR',
+        'adm0_name': 'Myanmar',
+        'coll_end_date': pd.Timestamp('2025-01-14 00:00:00'),
+        'round_num': 11
+    },{
+        'adm0_iso3': 'PAK',
+        'adm0_name': 'Pakistan',
+        'coll_end_date': pd.Timestamp('2025-01-14 00:00:00'),
+        'round_num': 6
+    },{
+        'adm0_iso3': 'AFG',
+        'adm0_name': 'Afghanistan',
+        'coll_end_date': pd.Timestamp('2025-01-14 00:00:00'),
+        'round_num': 10
+    }
+]
+
+
+else:
+    # Feature layer URL (Layer 0)
+    layer_url = "https://services5.arcgis.com/sjP4Ugu5s0dZWLjd/arcgis/rest/services/OER_Monitoring_System_View/FeatureServer/0"
+    layer = FeatureLayer(layer_url)
+    # Query all features
+    features = layer.query(where="round_validated='Yes'", out_fields="admin0_isocode, round, admin0_name_en, coll_end_date", return_geometry=False)
+    # Convert to DataFrame
+    df = features.sdf
+    # Drop duplicates to get unique combinations
+    unique_combinations = df.drop_duplicates(subset=["admin0_isocode", "round"]).reset_index(drop=True)
+    # Clean and prepare round column
+    df_clean = df.dropna(subset=["admin0_isocode", "round"]).copy()
+    # Extract numeric part from "Round 01", "Round 12", etc.
+    df_clean["round_num"] = df_clean["round"].str.extract(r"Round\s+(\d+)", expand=False).astype(int)
+    # Get the highest round per country
+    latest_rounds = df_clean.sort_values("round_num", ascending=False).drop_duplicates(subset=["admin0_isocode"])
+    # Sort by country code
+    latest_rounds = latest_rounds.sort_values("admin0_isocode").reset_index(drop=True)
+
+    latest_rounds = latest_rounds[latest_rounds["admin0_isocode"].isin(selected_countries)].reset_index(drop=True)
+    latest_rounds = latest_rounds.rename(columns={"admin0_isocode": "adm0_iso3", "admin0_name_en": "adm0_name"})
+    survey_list = latest_rounds.to_dict(orient="records")
+    # Print the result
+    for survey in survey_list:
+        print(survey["adm0_iso3"], survey["round_num"], survey.get("coll_end_date", "N/A"))
+
 # Show all columns and full width when printing DataFrames
 pd.set_option("display.max_columns", None)
 pd.set_option("display.width", None)
 pd.set_option("display.max_colwidth", None)
 
 # === PARAMETERS ===
-adm0_iso3 = "COD"
-round_num = 9
 group_indicators = {
     "fies_resid": "hh_residencetype",
     "fies_hhtype": "hh_agricactivity",
@@ -633,7 +710,13 @@ df_all = pd.read_csv(csv_path)
 # === Main loop ===
 for survey in survey_list:
     adm0_iso3 = survey["adm0_iso3"]
+    adm0_name = survey["adm0_name"]
     round_num = survey["round_num"]
+    coll_end_date = survey["coll_end_date"]
+    print("Processing %s r%s" % (adm0_iso3, adm0_name))
+# for survey in survey_list:
+#     adm0_iso3 = survey["adm0_iso3"]
+#     round_num = survey["round_num"]
     df = df_all[(df_all["adm0_iso3"] == adm0_iso3) & (df_all["round"] == round_num)]
     print(f"Fetched {len(df)} records for {adm0_iso3} round {round_num}.")
 
@@ -654,7 +737,7 @@ for survey in survey_list:
         # #agricultural dependancy by residency status
         result_dfs.append(agricultural_dependency(df))
     else:
-        msg = "This survey did not contain valid data for residency status (hh_residencetype), so residency-based analysis was skipped."
+        msg = "This survey did not contain a question on residency status (hh_residencetype), so residency-based analysis was skipped."
         print(msg)
         result_dfs.append({
             "title": "Residency-based analysis",
@@ -670,7 +753,16 @@ for survey in survey_list:
     # Append comparison
     result_dfs.append(compare_needs_vs_assistance(needs_res, assistance_res))
     # Grouped by received assistance type
-    result_dfs.append(assistance_quality_summary(df, group_by="need_received"))
+    if "assistance_quality" in df.columns and df["assistance_quality"].dropna().any():
+        result_dfs.append(assistance_quality_summary(df, group_by="need_received"))
+    else:
+        msg = "This survey did not contain a question on quality of assistance, so analysis on assistance satisfaction was skipped."
+        print(msg)
+        result_dfs.append({
+            "title": "Satisfaction with assistance by group of assistance received",
+            "metadata": None,
+            "df": pd.DataFrame({"Message": [msg]})
+        })
 
 
 
@@ -711,7 +803,15 @@ for survey in survey_list:
             return label if len(label) <= max_len else label[:max_len - 3] + "..."
 
         # Add main title
-        ws.cell(row=current_row, column=1, value="DIEM surveys analysis for ERPs - July 2025")
+        coll_end_date_raw = survey.get("coll_end_date", "")
+        try:
+            coll_end_date = pd.to_datetime(coll_end_date_raw).strftime("%Y-%m-%d")
+        except:
+            coll_end_date = coll_end_date_raw  # fallback in case parsing fails
+
+        title_string = f"DIEM surveys analysis for ERPs – {adm0_name} – Round {round_num} – Data collection ended on {coll_end_date}"
+        ws.cell(row=current_row, column=1, value=title_string)
+
         ws.cell(row=current_row, column=1).font = Font(size=14, bold=True)
         current_row += 2  # leave a blank row after main title
 
@@ -782,6 +882,12 @@ for survey in survey_list:
                 chart_position = f"{chart_col_letter}{start_row}"
                 ws.add_chart(chart, chart_position)
 
-        output_path = f"DIEM_survey_analysis_ERPs_202507_{adm0_iso3}_{round_num}.xlsx"
+        # Create the output directory if it does not exist
+        output_dir = "outputs_for_erps"
+        os.makedirs(output_dir, exist_ok=True)
+
+        # Define path inside the subdirectory
+        output_path = os.path.join(output_dir, f"DIEM_survey_analysis_ERPs_202507_{adm0_iso3}_{round_num}.xlsx")
         wb.save(output_path)
         print(f"\nExported grouped analysis with adaptive chart layout to: {output_path}")
+
