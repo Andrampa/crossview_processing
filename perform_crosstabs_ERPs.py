@@ -35,8 +35,33 @@ selected_countries = [
     "ZWE"   # Zimbabwe
 ]
 
+selected_countries = [
+    "AFG",  # Afghanistan
+    "BGD",  # Bangladesh
+    "BFA",  # Burkina Faso
+    "CMR",  # Cameroon
+    "CAF",  # Central African Republic (CAR)
+    "TCD",  # Chad
+    "COL",  # Colombia
+    "COD",  # Democratic Republic of the Congo (DRC)
+    "SLV",  # El Salvador
+    "GTM",  # Guatemala
+    "HTI",  # Haiti
+    "HND",  # Honduras
+    "LBN",  # Lebanon
+    "MLI",  # Mali
+    "MOZ",  # Mozambique
+    "MMR",  # Myanmar
+    "NER",  # Niger
+    "NGA",  # Nigeria
+    "YEM",  # Yemen
+    "IRQ",  # Iraq
+    "PAK",  # Pakistan
+    "MWI",  # Malawi
+    "ZWE"   # Zimbabwe
+]
 # selected_countries = [
-#     "PAK"]
+#     "BGD"]
 
 get_updated_list_of_surveys_from_AGOL = True
 
@@ -44,7 +69,12 @@ if get_updated_list_of_surveys_from_AGOL == False:
     # survey_list =[{ 'adm0_iso3': 'AFG', 'adm0_name': 'Afghanistan', 'round_num': 10, 'coll_end_date': Timestamp('2024-07-10 00:00:00')},
     #               { 'adm0_iso3': 'HTI', 'adm0_name': 'Haiti', 'round_num': 6, 'coll_end_date': Timestamp('2024-07-10 00:00:00')}]
 
-    survey_list =[
+    survey_list =[{
+        'adm0_iso3': 'BGD',
+        'adm0_name': 'Bangladesh',
+        'coll_end_date': pd.Timestamp('2025-01-14 00:00:00'),
+        'round_num': 12
+    },
     {
         'adm0_iso3': 'MMR',
         'adm0_name': 'Myanmar',
@@ -700,6 +730,85 @@ def assistance_quality_summary(df, group_by="need_received"):
     }
 
 
+def extract_top10_by_cropland(country_iso3, file_name="IPC_multicountry_20250707.xlsx"):
+    """
+    Loads the IPC Excel file, extracts the sheet for the given country (ISO3),
+    and returns a dictionary with a title and the top 10 adm2 units
+    with the highest cropland exposed to floods (rounded to 1 decimal).
+    Unnecessary fields are removed and adm2 fields are listed before adm1.
+    If the sheet is missing, empty, or an error occurs, 'SKIPPED' is included in the title.
+    """
+    base_title = "List of adm2 units in IPC3+ with the highest amount of cropland exposed to floods"
+
+    columns_to_keep = [
+        "adm0_name", "adm0_ISO3", "adm1_name", "adm1_pcode", "adm2_name", "adm2_pcode",
+        "cropland_exp_sqkm", "cropland_tot_sqkm", "crop_exp_perc",
+        "pop_exposed", "pop_total", "pop_exp_perc",
+        "area_phase_current", "analysis_period_current",
+        "area_phase_proj1", "analysis_period_proj1"
+    ]
+
+    rename_dict = {
+        "cropland_exp_sqkm": "Cropland exposed (Km2)",
+        "cropland_tot_sqkm": "Total cropland (Km2)",
+        "crop_exp_perc": "% of cropland exposed",
+        "pop_exposed": "Population exposed",
+        "pop_total": "Total population",
+        "pop_exp_perc": "% of population exposed",
+        "area_phase_current": "IPC/CH area current",
+        "analysis_period_current": "Period of current IPC analysis",
+        "area_phase_proj1": "IPC/CH area projected",
+        "analysis_period_proj1": "Period of projected IPC analysis"
+    }
+
+    try:
+        file_path = os.path.join(os.path.dirname(__file__), file_name)
+        df = pd.read_excel(file_path, sheet_name=country_iso3)
+
+        if df.empty:
+            print(f"Sheet '{country_iso3}' exists but is empty.")
+            return {
+                "title": f"{base_title} — SKIPPED: Sheet '{country_iso3}' is empty",
+                "df": pd.DataFrame()
+            }
+
+        df_filtered = df[columns_to_keep].rename(columns=rename_dict)
+        df_filtered = df_filtered.round(1)
+        df_filtered = df_filtered[df_filtered["IPC/CH area projected"] >= 3]
+
+        # Drop unnecessary fields
+        df_filtered = df_filtered.drop(columns=["adm0_name", "adm0_ISO3"], errors="ignore")
+
+        # Reorder adm2 fields before adm1
+        desired_order = [
+            "adm2_name", "adm2_pcode",
+            "adm1_name"
+        ] + [col for col in df_filtered.columns if col not in ["adm1_name", "adm1_pcode", "adm2_name", "adm2_pcode"]]
+        df_filtered = df_filtered[desired_order]
+
+        df_top10 = df_filtered.sort_values(by="Cropland exposed (Km2)", ascending=False).head(10)
+
+        return {
+            "title": base_title,
+            "df": df_top10
+        }
+
+    except FileNotFoundError:
+        msg = f"{base_title} — SKIPPED: File '{file_name}' not found"
+        print(msg)
+    except ValueError:
+        msg = f"{base_title} — SKIPPED: Sheet '{country_iso3}' not found"
+        print(msg)
+    except Exception as e:
+        msg = f"{base_title} — SKIPPED: Error processing sheet '{country_iso3}': {e}"
+        print(msg)
+
+    return {
+        "title": msg,
+        "df": pd.DataFrame()
+    }
+
+
 # === LOAD CSV ===
 
 # csv_path = r"C:\git\crossview_processing\DIEM_micro20250703_CODR89.csv"
@@ -763,7 +872,8 @@ for survey in survey_list:
             "metadata": None,
             "df": pd.DataFrame({"Message": [msg]})
         })
-
+    #IPC and flood exposure
+    result_dfs.append(extract_top10_by_cropland(adm0_iso3))
 
 
     # Print results
