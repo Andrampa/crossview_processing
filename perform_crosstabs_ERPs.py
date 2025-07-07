@@ -2,6 +2,15 @@ import pandas as pd
 import json
 import re
 
+# === Parameters ===
+survey_list = [
+    {"adm0_iso3": "COD", "round_num": 9},
+    {"adm0_iso3": "AFG", "round_num": 10},
+    {"adm0_iso3": "IRQ", "round_num": 13}
+]
+
+#survey_list = [{"adm0_iso3": "IRQ", "round_num": 13}]
+survey_list = [{"adm0_iso3": "AFG", "round_num": 10}]
 # Show all columns and full width when printing DataFrames
 pd.set_option("display.max_columns", None)
 pd.set_option("display.width", None)
@@ -33,70 +42,8 @@ def get_indicator_info(indicator_name):
         "codes": indicator_data[indicator_name]["codes"]
     }
 
-# === LOAD CSV ===
 
-csv_path = r"C:\git\crossview_processing\DIEM_micro20250703_CODR89.csv"
-df_all = pd.read_csv(csv_path)
-
-# Filter for current round only
-df = df_all[(df_all["adm0_iso3"] == adm0_iso3) & (df_all["round"] == round_num)]
-print(f"Fetched {len(df)} records for round {round_num}.")
-
-
-def fies_by_indicator_old(indicator_key, df):
-    fies_fields = {
-        "p_mod": "% moderate/severe (p_mod)",
-        "p_sev": "% severe only (p_sev)"
-    }
-    fies_rows = []
-    indicator = group_indicators[indicator_key]
-    info = get_indicator_info(indicator)
-    title = info["title"]
-    codes = info["codes"]
-
-    for code, label in codes.items():
-        group_df = df[df[indicator].astype(str) == code]
-        if len(group_df) == 0:
-            continue
-        print(f"Processing FIES for group '{label}' ({len(group_df)} records)...")
-
-        row_data = {}
-        for field, label_field in fies_fields.items():
-            weighted_sum = 0.0
-            total_weight = 0.0
-            for _, row in group_df.iterrows():
-                try:
-                    w = float(row.get("weight_final", 0))
-                    val = float(row.get(field, 0))
-                    if w > 0 and pd.notna(val):
-                        weighted_sum += w * val
-                        total_weight += w
-                except:
-                    continue
-            row_data[label_field] = round((weighted_sum / total_weight) * 100, 1) if total_weight > 0 else 0.0
-        row_data[title] = label
-        fies_rows.append(row_data)
-
-    fies_df = pd.DataFrame(fies_rows).set_index(title)
-    total_row = {}
-    for field, label_field in fies_fields.items():
-        weighted_sum = 0.0
-        total_weight = 0.0
-        for _, row in df.iterrows():
-            try:
-                w = float(row.get("weight_final", 0))
-                val = float(row.get(field, 0))
-                if w > 0 and pd.notna(val):
-                    weighted_sum += w * val
-                    total_weight += w
-            except:
-                continue
-        total_row[label_field] = round((weighted_sum / total_weight) * 100, 1) if total_weight > 0 else 0.0
-    fies_df.loc["TOTAL"] = pd.Series(total_row)
-    return {
-        "title": f"FIES: Prevalence of food insecurity (% of HH) by {title}",
-        "df": fies_df
-    }
+# === DEFINE FUNCTION  ===
 
 def fies_by_indicator(indicator_key, df, universe_label=None):
     fies_fields = {
@@ -108,6 +55,7 @@ def fies_by_indicator(indicator_key, df, universe_label=None):
     info = get_indicator_info(indicator)
     title = info["title"]
     codes = info["codes"]
+
 
     # Generate the descriptive title
     if universe_label is None:
@@ -161,9 +109,13 @@ def fies_by_indicator(indicator_key, df, universe_label=None):
                 continue
         total_row[label_field] = round((weighted_sum / total_weight) * 100, 1) if total_weight > 0 else 0.0
     fies_df.loc["TOTAL"] = pd.Series(total_row)
+    if indicator_key == 'fies_hhtype':
+        title = f"FIES: Prevalence of recent food insecurity (% of HH) by detailed agricultural dependency group (% of HH)"
+    elif indicator_key == 'fies_resid':
+        title = f"FIES: Prevalence of recent food insecurity (% of HH) by residency status (% of HH)"
 
     return {
-        "title": f"FIES: Prevalence of food insecurity (% of HH) by {title}",
+        "title": title,
         "subtitle": subtitle,
         "df": fies_df
     }
@@ -222,20 +174,24 @@ def fies_by_simplified_agriculture(df):
         total_row[label_field] = round((weighted_sum / total_weight) * 100, 1) if total_weight > 0 else 0.0
     fies_df.loc["TOTAL"] = pd.Series(total_row)
     return {
-        "title": "FIES: Prevalence of food insecurity by simplified agri group (% of HH)",
+        "title": "FIES: Prevalence of recent food insecurity by simplified agricultural dependency group (% of HH)",
         "df": fies_df
     }
 
 def agricultural_dependency(df):
+    # Full category labels
     agriculture_categories = {
         1: "Yes - crop production",
         2: "Yes - livestock production",
         3: "Yes - both crop and livestock production",
-        4: "No",
+        4: "Non-agricultural household",
         888: "Don't know",
         999: "Refused"
     }
-    agriculture_keys = list(agriculture_categories.keys())
+
+    # Keep only valid analytical codes (exclude DK and REF)
+    agriculture_keys = [1, 2, 3, 4]
+
     agri_indicator = group_indicators["agriculture"]
     agri_info = get_indicator_info(agri_indicator)
     agri_title = agri_info["title"]
@@ -251,6 +207,7 @@ def agricultural_dependency(df):
         if len(group_df) == 0:
             continue
         print(f"Processing AGRICULTURE for group '{label}' ({len(group_df)} records)...")
+
         weighted_counts = {k: 0.0 for k in agriculture_keys}
         total_weight = 0.0
         for _, row in group_df.iterrows():
@@ -262,6 +219,7 @@ def agricultural_dependency(df):
                     total_weight += w
             except:
                 continue
+
         row_data = {
             agriculture_categories[k]: (weighted_counts[k] / total_weight * 100 if total_weight > 0 else 0.0)
             for k in agriculture_keys
@@ -283,6 +241,7 @@ def agricultural_dependency(df):
                 total_weight += w
         except:
             continue
+
     total_row = {
         agriculture_categories[k]: (total_counts[k] / total_weight * 100 if total_weight > 0 else 0.0)
         for k in agriculture_keys
@@ -290,10 +249,9 @@ def agricultural_dependency(df):
     df_result.loc["TOTAL"] = pd.Series(total_row).round(1)
 
     return {
-        "title": "Agricultural dependency by residency status (% of HH)",
+        "title": "Detailed agricultural dependency by residency status (% of HH)",
         "df": df_result
     }
-
 
 def simplified_dependency_by_residency(df):
     df = df.copy()
@@ -361,7 +319,6 @@ def simplified_dependency_by_residency(df):
         "df": df_result
     }
 
-
 def needs_summary_grouped(df_all, adm0_iso3, round_num, use_grouping=True, use_previous_round=True, universe_filter=[1]):
     import collections
 
@@ -385,9 +342,7 @@ def needs_summary_grouped(df_all, adm0_iso3, round_num, use_grouping=True, use_p
     need_fields_dict = {
         "need_food": "need_food",
         "need_cash": "need_cash",
-        "need_other": "need_other",
-        "need_dk": "need_dk",
-        "need_ref": "need_ref",
+        "need_other": "agricultural livelihoods",
         "need_vouchers_fair": "agricultural livelihoods",
         "need_crop_inputs": "agricultural livelihoods",
         "need_crop_infrastructure": "agricultural livelihoods",
@@ -456,7 +411,6 @@ def needs_summary_grouped(df_all, adm0_iso3, round_num, use_grouping=True, use_p
         "df": df_result
     }
 
-
 def assistance_summary(df, use_grouping=True, universe_filter=[1], round_num=None, adm0_iso3=None):
     import collections
 
@@ -474,10 +428,8 @@ def assistance_summary(df, use_grouping=True, universe_filter=[1], round_num=Non
         "need_received_fish_assist": "agricultural livelihoods",
         "need_received_rehabilitation": "agricultural livelihoods",
         "need_received_sales_support": "agricultural livelihoods",
-        "need_received_other": "need_received_other",
-        "need_received_none": "need_received_none",
-        "need_received_dk": "need_received_dk",
-        "need_received_ref": "need_received_ref"
+        "need_received_other": "agricultural livelihoods",
+        "need_received_none": "need_received_none"
     }
 
     if use_grouping:
@@ -559,13 +511,12 @@ def compare_needs_vs_assistance(needs_result, assistance_result):
         "df": merged_df
     }
 
-
 def assistance_quality_summary(df, group_by="need_received"):
     from collections import defaultdict
 
-    # === Satisfaction categories ===
+    # === Satisfaction categories (full, but 888 and 999 will be excluded later) ===
     assistance_categories = {
-        1: "Yes",
+        1: "Yes - satisfied",
         2: "No - not received on time",
         3: "No - did not meet my needs",
         4: "No - quantity was not sufficient",
@@ -596,7 +547,7 @@ def assistance_quality_summary(df, group_by="need_received"):
         field_dict = {
             "need_food": "need_food",
             "need_cash": "need_cash",
-            "need_other": "need_other",
+            "need_other": "agricultural livelihoods",
             "need_dk": "need_dk",
             "need_ref": "need_ref",
             "need_vouchers_fair": "agricultural livelihoods",
@@ -622,7 +573,9 @@ def assistance_quality_summary(df, group_by="need_received"):
     for field, group in field_dict.items():
         group_fields[group].append(field)
 
-    all_categories = list(assistance_categories.keys())
+    # Only use the valid categories for output
+    valid_categories = [1, 2, 3, 4, 5, 6]
+
     result_rows = []
 
     for group, fields in group_fields.items():
@@ -632,7 +585,7 @@ def assistance_quality_summary(df, group_by="need_received"):
 
         print(f"Processing ASSISTANCE QUALITY for group '{group}' ({len(group_df)} records)...")
 
-        weighted_counts = {cat: 0.0 for cat in all_categories}
+        weighted_counts = {cat: 0.0 for cat in valid_categories}
         total_weight = 0.0
 
         for _, row in group_df.iterrows():
@@ -651,7 +604,7 @@ def assistance_quality_summary(df, group_by="need_received"):
         row = {
             f"{group_label} group": group.replace("need_received_", "").replace("need_", "").replace("_", " ").capitalize()
         }
-        for cat in all_categories:
+        for cat in valid_categories:
             label = assistance_categories[cat]
             row[label] = round((weighted_counts[cat] / total_weight) * 100, 1)
 
@@ -660,142 +613,175 @@ def assistance_quality_summary(df, group_by="need_received"):
     index_name = f"{group_label} group"
     df_result = pd.DataFrame(result_rows).set_index(index_name).round(1)
 
-    title = f"Satisfaction with assistance by {group_label.lower()} group"
+    sample_size = df["assistance_quality"].dropna().shape[0]
+    warning = " — Warning: small sample size" if sample_size < 100 else ""
+    title = f"Satisfaction with assistance by group of assistance received (sample for question on satisfaction = {sample_size}){warning}"
+
     return {
         "title": title,
         "df": df_result
     }
 
 
-# === MAIN EXECUTION ===
-result_dfs = []
-##FIES by residency status
-result_dfs.append(fies_by_indicator("fies_resid", df))
-# #FIES by agricultural dependancy
-result_dfs.append(fies_by_indicator("fies_hhtype", df))
-# #FIES by agricultural dependancy simplified
-result_dfs.append(fies_by_simplified_agriculture(df))
-# #agricultural dependancy by residency status
-result_dfs.append(agricultural_dependency(df))
-# #agricultural dependancy simplified by residency status
-result_dfs.append(simplified_dependency_by_residency(df))
-# # Needs summary grouped, using previous round, and custom universe
-needs_res = needs_summary_grouped(df_all, adm0_iso3, round_num,use_grouping=True, use_previous_round=True,universe_filter=[0, 1, 888])
-# # Assistance summary (grouped)
-assistance_res = assistance_summary(    df, use_grouping=True,universe_filter=[0, 1, 888],round_num=round_num,adm0_iso3=adm0_iso3)
-result_dfs.append(needs_res)
-result_dfs.append(assistance_res)
-# Append comparison
-result_dfs.append(compare_needs_vs_assistance(needs_res, assistance_res))
+# === LOAD CSV ===
 
-# Grouped by received assistance type
-result_dfs.append(assistance_quality_summary(df, group_by="need_received"))
+# csv_path = r"C:\git\crossview_processing\DIEM_micro20250703_CODR89.csv"
+csv_path = r"C:\git\crossview_processing\DIEM_micro20250703.csv"
 
-# Grouped by type of need reported
-result_dfs.append(assistance_quality_summary(df, group_by="need"))
+df_all = pd.read_csv(csv_path)
+
+# === Main loop ===
+for survey in survey_list:
+    adm0_iso3 = survey["adm0_iso3"]
+    round_num = survey["round_num"]
+    df = df_all[(df_all["adm0_iso3"] == adm0_iso3) & (df_all["round"] == round_num)]
+    print(f"Fetched {len(df)} records for {adm0_iso3} round {round_num}.")
 
 
-# Print results
-for res in result_dfs:
-    print(f"\n=== {res['title']} ===")
-    if "metadata" in res:
-        print(res["metadata"])
-    print()
-    print(res["df"])
 
-if export_csv:
-    from openpyxl import Workbook
-    from openpyxl.utils.dataframe import dataframe_to_rows
-    from openpyxl.chart import BarChart, Reference
-    from openpyxl.styles import Font, Border, Side
-    from openpyxl.utils import get_column_letter
+    # === MAIN EXECUTION ===
+    result_dfs = []
 
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "DIEM Surveys analysis"
+    # #FIES by agricultural dependancy simplified
+    result_dfs.append(fies_by_simplified_agriculture(df))
+    # #FIES by agricultural dependancy
+    result_dfs.append(fies_by_indicator("fies_hhtype", df))
+    if "hh_residencetype" in df.columns and df["hh_residencetype"].dropna().any():
+        ##FIES by residency status
+        result_dfs.append(fies_by_indicator("fies_resid", df))
+        # #agricultural dependancy simplified by residency status
+        result_dfs.append(simplified_dependency_by_residency(df))
+        # #agricultural dependancy by residency status
+        result_dfs.append(agricultural_dependency(df))
+    else:
+        msg = "This survey did not contain valid data for residency status (hh_residencetype), so residency-based analysis was skipped."
+        print(msg)
+        result_dfs.append({
+            "title": "Residency-based analysis",
+            "metadata": None,
+            "df": pd.DataFrame({"Message": [msg]})
+        })
+    # # Needs summary grouped, using previous round, and custom universe
+    needs_res = needs_summary_grouped(df_all, adm0_iso3, round_num,use_grouping=True, use_previous_round=True,universe_filter=[0, 1, 888])
+    # # Assistance summary (grouped)
+    assistance_res = assistance_summary(    df, use_grouping=True,universe_filter=[0, 1, 888],round_num=round_num,adm0_iso3=adm0_iso3)
+    result_dfs.append(needs_res)
+    result_dfs.append(assistance_res)
+    # Append comparison
+    result_dfs.append(compare_needs_vs_assistance(needs_res, assistance_res))
+    # Grouped by received assistance type
+    result_dfs.append(assistance_quality_summary(df, group_by="need_received"))
 
-    # Set wider column widths for A–E
-    for col in ["A", "B", "C", "D", "E"]:
-        ws.column_dimensions[col].width = 24
 
-    current_row = 1
-    label_max_len = 30   # Truncate chart labels beyond this length
 
-    thin_border = Border(
-        left=Side(style="thin"),
-        right=Side(style="thin"),
-        top=Side(style="thin"),
-        bottom=Side(style="thin")
-    )
+    # Print results
+    for res in result_dfs:
+        print(f"\n=== {res['title']} ===")
+        if "metadata" in res:
+            print(res["metadata"])
+        print()
+        print(res["df"])
 
-    def truncate_label(label, max_len):
-        return label if len(label) <= max_len else label[:max_len - 3] + "..."
+    if export_csv:
+        from openpyxl import Workbook
+        from openpyxl.utils.dataframe import dataframe_to_rows
+        from openpyxl.chart import BarChart, Reference
+        from openpyxl.styles import Font, Border, Side
+        from openpyxl.utils import get_column_letter
 
-    # Add main title
-    ws.cell(row=current_row, column=1, value="DIEM surveys analysis for ERPs - July 2025")
-    ws.cell(row=current_row, column=1).font = Font(size=14, bold=True)
-    current_row += 2  # leave a blank row after main title
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "DIEM Surveys analysis"
 
-    for i, result in enumerate(result_dfs):
-        if i > 0:
-            current_row += 15  # space between tables
+        # Set wider column widths for A–E
+        for col in ["A", "B", "C", "D", "E"]:
+            ws.column_dimensions[col].width = 24
 
-        # Title and metadata
-        if "title" in result:
-            ws.cell(row=current_row, column=1, value=result["title"])
-            ws.cell(row=current_row, column=1).font = Font(bold=True)
-            current_row += 1
-        if "metadata" in result:
-            ws.cell(row=current_row, column=1, value=result["metadata"])
-            current_row += 1
+        current_row = 1
+        label_max_len = 30   # Truncate chart labels beyond this length
 
-        df = result["df"].reset_index()
+        thin_border = Border(
+            left=Side(style="thin"),
+            right=Side(style="thin"),
+            top=Side(style="thin"),
+            bottom=Side(style="thin")
+        )
 
-        # Create truncated label column for chart X-axis
-        chart_labels_col = df.columns[0] + "_short"
-        df[chart_labels_col] = df.iloc[:, 0].apply(lambda x: truncate_label(str(x), label_max_len))
+        def truncate_label(label, max_len):
+            return label if len(label) <= max_len else label[:max_len - 3] + "..."
 
-        start_row = current_row
+        # Add main title
+        ws.cell(row=current_row, column=1, value="DIEM surveys analysis for ERPs - July 2025")
+        ws.cell(row=current_row, column=1).font = Font(size=14, bold=True)
+        current_row += 2  # leave a blank row after main title
 
-        # Write table (full-length labels)
-        table_cols = list(df.columns[:-1])  # exclude chart_labels_col
-        for row_idx, row in enumerate(dataframe_to_rows(df[table_cols], index=False, header=True)):
-            for col_idx, val in enumerate(row, 1):
-                cell = ws.cell(row=current_row, column=col_idx, value=val)
-                cell.border = thin_border
-            current_row += 1
+        for i, result in enumerate(result_dfs):
+            if i > 0:
+                current_row += 15  # space between tables
 
-        # Write truncated labels far right in column AZ (col 52)
-        chart_label_col_idx = 52
-        ws.cell(row=start_row, column=chart_label_col_idx, value="Chart labels")
-        for r in range(df.shape[0]):
-            label_val = df.iloc[r, df.columns.get_loc(chart_labels_col)]
-            ws.cell(row=start_row + 1 + r, column=chart_label_col_idx, value=label_val)
+            # Title and metadata
+            if "title" in result:
+                ws.cell(row=current_row, column=1, value=result["title"])
+                ws.cell(row=current_row, column=1).font = Font(bold=True)
+                current_row += 1
+            if "metadata" in result:
+                ws.cell(row=current_row, column=1, value=result["metadata"])
+                current_row += 1
 
-        # Create chart
-        num_cols = len(table_cols)
-        num_rows = df.shape[0]
-        if num_cols >= 2:
-            chart = BarChart()
-            chart.type = "col"
-            chart.title = "Chart: " + result["title"]
-            chart.y_axis.title = "Percentage"
-            chart.x_axis.title = df.columns[0]
-            chart.width = 18
-            chart.height = 9
+            df = result["df"].reset_index()
 
-            data = Reference(ws, min_col=2, min_row=start_row, max_col=num_cols, max_row=start_row + num_rows)
-            categories = Reference(ws, min_col=chart_label_col_idx, min_row=start_row + 1, max_row=start_row + num_rows)
+            # === If result is a 1-row message that includes 'skipped', print explanation and skip table/chart
+            if df.shape == (1, 2) and "skipped" in str(df.iloc[0, 1]).lower():
+                skip_reason = str(df.iloc[0, 1])
+                ws.cell(row=current_row, column=1, value=skip_reason)
+                current_row += 2  # leave a line after the message
+                continue
 
-            chart.add_data(data, titles_from_data=True)
-            chart.set_categories(categories)
+            # Create truncated label column for chart X-axis
+            chart_labels_col = df.columns[0] + "_short"
+            df[chart_labels_col] = df.iloc[:, 0].apply(lambda x: truncate_label(str(x), label_max_len))
 
-            # Place chart 2 columns after the last table column
-            chart_col = num_cols + 2
-            chart_col_letter = get_column_letter(chart_col)
-            chart_position = f"{chart_col_letter}{start_row}"
-            ws.add_chart(chart, chart_position)
+            start_row = current_row
 
-    output_path = f"DIEM_survey_analysis_ERPs_202507_{adm0_iso3}_{round_num}.xlsx"
-    wb.save(output_path)
-    print(f"\nExported grouped analysis with adaptive chart layout to: {output_path}")
+            # Write table (full-length labels)
+            table_cols = list(df.columns[:-1])  # exclude chart_labels_col
+            for row_idx, row in enumerate(dataframe_to_rows(df[table_cols], index=False, header=True)):
+                for col_idx, val in enumerate(row, 1):
+                    cell = ws.cell(row=current_row, column=col_idx, value=val)
+                    cell.border = thin_border
+                current_row += 1
+
+            # Write truncated labels far right in column AZ (col 52)
+            chart_label_col_idx = 52
+            ws.cell(row=start_row, column=chart_label_col_idx, value="Chart labels")
+            for r in range(df.shape[0]):
+                label_val = df.iloc[r, df.columns.get_loc(chart_labels_col)]
+                ws.cell(row=start_row + 1 + r, column=chart_label_col_idx, value=label_val)
+
+            # Create chart
+            num_cols = len(table_cols)
+            num_rows = df.shape[0]
+            if num_cols >= 2:
+                chart = BarChart()
+                chart.type = "col"
+                chart.title = "Chart: " + result["title"]
+                chart.y_axis.title = "Percentage"
+                chart.x_axis.title = df.columns[0]
+                chart.width = 18
+                chart.height = 9
+
+                data = Reference(ws, min_col=2, min_row=start_row, max_col=num_cols, max_row=start_row + num_rows)
+                categories = Reference(ws, min_col=chart_label_col_idx, min_row=start_row + 1, max_row=start_row + num_rows)
+
+                chart.add_data(data, titles_from_data=True)
+                chart.set_categories(categories)
+
+                # Place chart 2 columns after the last table column
+                chart_col = num_cols + 2
+                chart_col_letter = get_column_letter(chart_col)
+                chart_position = f"{chart_col_letter}{start_row}"
+                ws.add_chart(chart, chart_position)
+
+        output_path = f"DIEM_survey_analysis_ERPs_202507_{adm0_iso3}_{round_num}.xlsx"
+        wb.save(output_path)
+        print(f"\nExported grouped analysis with adaptive chart layout to: {output_path}")
