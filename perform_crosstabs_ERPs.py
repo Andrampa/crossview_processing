@@ -61,7 +61,7 @@ selected_countries = [
     "ZWE"   # Zimbabwe
 ]
 selected_countries = [
-    "BGD"]
+    "AFG"]
 
 get_updated_list_of_surveys_from_AGOL = False
 
@@ -808,6 +808,39 @@ def extract_top10_by_cropland(country_iso3, file_name="IPC_multicountry_20250707
         "df": pd.DataFrame()
     }
 
+def residency_sample_size_summary(df):
+    """
+    Summarizes and prints the sample size by residency status,
+    ensuring consistent integer comparisons.
+    """
+    # Load official residency labels from metadata
+    residency_labels = get_indicator_info('hh_residencetype').get("codes", {})
+
+    # Ensure hh_residencetype is numeric (convert errors to NaN)
+    df = df.copy()
+    df["hh_residencetype"] = pd.to_numeric(df["hh_residencetype"], errors="coerce").astype("Int64")
+
+    results = []
+    total = 0
+
+    for code_str, label in residency_labels.items():
+        try:
+            code = int(code_str)
+        except ValueError:
+            continue
+
+        count = df[df["hh_residencetype"] == code].shape[0]
+        results.append(f"{label}: {count}")
+        total += count
+
+    summary_text = f"Sample size by residency status – Total: {total} | " + " | ".join(results)
+    print(summary_text)
+
+    return {
+        "title": "Sample size by residency status",
+        "metadata": None,
+        "df": pd.DataFrame({"Message": [summary_text]})
+    }
 
 # === LOAD CSV ===
 
@@ -839,6 +872,7 @@ for survey in survey_list:
     # #FIES by agricultural dependancy
     result_dfs.append(fies_by_indicator("fies_hhtype", df))
     if "hh_residencetype" in df.columns and df["hh_residencetype"].dropna().any():
+        result_dfs.append(residency_sample_size_summary(df))
         ##FIES by residency status
         result_dfs.append(fies_by_indicator("fies_resid", df))
         # #agricultural dependancy simplified by residency status
