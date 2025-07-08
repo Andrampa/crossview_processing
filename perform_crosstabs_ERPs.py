@@ -1047,10 +1047,11 @@ for survey in survey_list:
                     chart.add_data(data, titles_from_data=True)
                     chart.set_categories(categories)
 
-                    chart_col = num_cols + 2
-                    chart_col_letter = get_column_letter(chart_col)
-                    chart_position = f"{chart_col_letter}{start_row}"
+                    chart_row = current_row + 2
+                    chart_position = f"B{chart_row}"
+
                     ws.add_chart(chart, chart_position)
+                    current_row = chart_row + 7
 
         # Create the output directory if it does not exist
         output_dir = "outputs_for_erps"
