@@ -35,35 +35,10 @@ selected_countries = [
     "ZWE"   # Zimbabwe
 ]
 
-selected_countries = [
-    "AFG",  # Afghanistan
-    "BGD",  # Bangladesh
-    "BFA",  # Burkina Faso
-    "CMR",  # Cameroon
-    "CAF",  # Central African Republic (CAR)
-    "TCD",  # Chad
-    "COL",  # Colombia
-    "COD",  # Democratic Republic of the Congo (DRC)
-    "SLV",  # El Salvador
-    "GTM",  # Guatemala
-    "HTI",  # Haiti
-    "HND",  # Honduras
-    "LBN",  # Lebanon
-    "MLI",  # Mali
-    "MOZ",  # Mozambique
-    "MMR",  # Myanmar
-    "NER",  # Niger
-    "NGA",  # Nigeria
-    "YEM",  # Yemen
-    "IRQ",  # Iraq
-    "PAK",  # Pakistan
-    "MWI",  # Malawi
-    "ZWE"   # Zimbabwe
-]
-selected_countries = [
-    "AFG"]
+# selected_countries = [
+#    'AFG']
 
-get_updated_list_of_surveys_from_AGOL = False
+get_updated_list_of_surveys_from_AGOL = True
 
 if get_updated_list_of_surveys_from_AGOL == False:
     # survey_list =[{ 'adm0_iso3': 'AFG', 'adm0_name': 'Afghanistan', 'round_num': 10, 'coll_end_date': Timestamp('2024-07-10 00:00:00')},
@@ -117,8 +92,8 @@ else:
     latest_rounds = latest_rounds.rename(columns={"admin0_isocode": "adm0_iso3", "admin0_name_en": "adm0_name"})
     survey_list = latest_rounds.to_dict(orient="records")
     # Print the result
-    for survey in survey_list:
-        print(survey["adm0_iso3"], survey["round_num"], survey.get("coll_end_date", "N/A"))
+    # for survey in survey_list:
+    #     print(survey["adm0_iso3"], survey["round_num"], survey.get("coll_end_date", "N/A"))
 
 # Show all columns and full width when printing DataFrames
 pd.set_option("display.max_columns", None)
@@ -169,9 +144,11 @@ def fies_by_indicator(indicator_key, df, universe_label=None):
         universe_label = "all households"
     subtitle = f"FIES weighted average by {title} — Universe: {universe_label}"
 
-    print(subtitle)
+    # print(subtitle)
 
     for code, label in codes.items():
+        if label in ["Don't know", "Refused"]:
+            continue  # Skip unwanted categories
         try:
             group_df = df[df[indicator].astype("Int64") == int(code)]
         except ValueError:
@@ -179,7 +156,7 @@ def fies_by_indicator(indicator_key, df, universe_label=None):
 
         if len(group_df) == 0:
             continue
-        print(f"Processing FIES for group '{label}' ({len(group_df)} records)...")
+        #print(f"Processing FIES for group '{label}' ({len(group_df)} records)...")
 
         row_data = {}
         for field, label_field in fies_fields.items():
@@ -242,10 +219,11 @@ def fies_by_simplified_agriculture(df):
     }
     rows = []
     for group in df["agriculture_group"].dropna().unique():
+        if group in ["Don't know", "Refused"]:
+            continue  # Exclude these categories from the output table
         group_df = df[df["agriculture_group"] == group]
         if len(group_df) == 0:
             continue
-        print(f"Processing FIES by AGRI GROUP '{group}' ({len(group_df)} records)...")
         row_data = {}
         for field, label_field in fies_fields.items():
             weighted_sum = 0.0
@@ -285,6 +263,7 @@ def fies_by_simplified_agriculture(df):
         "df": fies_df
     }
 
+
 def agricultural_dependency(df):
     # Full category labels
     agriculture_categories = {
@@ -306,6 +285,8 @@ def agricultural_dependency(df):
     rows = []
 
     for code, label in agri_codes.items():
+        if label in ["Don't know", "Refused"]:
+            continue
         try:
             group_df = df[df[agri_indicator].astype("Int64") == int(code)]
         except ValueError:
@@ -313,7 +294,7 @@ def agricultural_dependency(df):
 
         if len(group_df) == 0:
             continue
-        print(f"Processing AGRICULTURE for group '{label}' ({len(group_df)} records)...")
+        #print(f"Processing AGRICULTURE for group '{label}' ({len(group_df)} records)...")
 
         weighted_counts = {k: 0.0 for k in agriculture_keys}
         total_weight = 0.0
@@ -375,6 +356,8 @@ def simplified_dependency_by_residency(df):
     rows = []
 
     for code, label in resid_codes.items():
+        if label in ["Don't know", "Refused"]:
+            continue
         try:
             group_df = df[df[agri_indicator].astype("Int64") == int(code)]
         except ValueError:
@@ -382,7 +365,7 @@ def simplified_dependency_by_residency(df):
         #group_df = df[df[agri_indicator].astype(str) == code]
         if len(group_df) == 0:
             continue
-        print(f"Processing SIMPLIFIED AGRIC DEPENDENCY for residency group '{label}' ({len(group_df)} records)...")
+        #print(f"Processing SIMPLIFIED AGRIC DEPENDENCY for residency group '{label}' ({len(group_df)} records)...")
         weighted_counts = {"Agricultural HH": 0.0, "Non-agricultural HH": 0.0}
         total_weight = 0.0
         for _, row in group_df.iterrows():
@@ -690,7 +673,7 @@ def assistance_quality_summary(df, group_by="need_received"):
         if group_df.empty:
             continue
 
-        print(f"Processing ASSISTANCE QUALITY for group '{group}' ({len(group_df)} records)...")
+        #print(f"Processing ASSISTANCE QUALITY for group '{group}' ({len(group_df)} records)...")
 
         weighted_counts = {cat: 0.0 for cat in valid_categories}
         total_weight = 0.0
@@ -745,7 +728,8 @@ def extract_top10_by_cropland(country_iso3, file_name="IPC_multicountry_20250707
         "cropland_exp_sqkm", "cropland_tot_sqkm", "crop_exp_perc",
         "pop_exposed", "pop_total", "pop_exp_perc",
         "area_phase_current", "analysis_period_current",
-        "area_phase_proj1", "analysis_period_proj1"
+        "area_phase_proj1", "analysis_period_proj1",
+        "area_phase_proj2", "analysis_period_proj2"  # <-- ADD THESE
     ]
 
     rename_dict = {
@@ -758,7 +742,9 @@ def extract_top10_by_cropland(country_iso3, file_name="IPC_multicountry_20250707
         "area_phase_current": "IPC/CH area current",
         "analysis_period_current": "Period of current IPC analysis",
         "area_phase_proj1": "IPC/CH area projected",
-        "analysis_period_proj1": "Period of projected IPC analysis"
+        "analysis_period_proj1": "Period of projected IPC analysis",
+        "area_phase_proj2": "IPC/CH area projected 2nd",  # <-- ADD
+        "analysis_period_proj2": "Period of 2nd projected IPC analysis"  # <-- ADD
     }
 
     try:
@@ -772,9 +758,25 @@ def extract_top10_by_cropland(country_iso3, file_name="IPC_multicountry_20250707
                 "df": pd.DataFrame()
             }
 
-        df_filtered = df[columns_to_keep].rename(columns=rename_dict)
+        # Keep only the columns that exist in the sheet
+        available_columns = [col for col in columns_to_keep if col in df.columns]
+        df_filtered = df[available_columns].rename(columns=rename_dict)
+
+        # Drop area_phase_proj2 and analysis_period_proj2 if they are entirely empty
+        for optional_field in ["IPC/CH area projected 2nd", "Period of 2nd projected IPC analysis"]:
+            if optional_field in df_filtered.columns and df_filtered[optional_field].isna().all():
+                df_filtered = df_filtered.drop(columns=optional_field)
+
         df_filtered = df_filtered.round(1)
-        df_filtered = df_filtered[df_filtered["IPC/CH area projected"] >= 3]
+
+        # Apply filtering only if any IPC area field is available and not all null
+        filter_applied = False
+        for col in [ "IPC/CH area projected 2nd", "IPC/CH area projected", "IPC/CH area current"]:
+            if col in df_filtered.columns and df_filtered[col].notna().any():
+                df_filtered = df_filtered[df_filtered[col] >= 3]
+                filter_applied = True
+                break  # Stop after applying the first valid filter
+
 
         # Drop unnecessary fields
         df_filtered = df_filtered.drop(columns=["adm0_name", "adm0_ISO3"], errors="ignore")
@@ -794,13 +796,14 @@ def extract_top10_by_cropland(country_iso3, file_name="IPC_multicountry_20250707
         }
 
     except FileNotFoundError:
-        msg = f"{base_title} — SKIPPED: File '{file_name}' not found"
+        msg = f"{base_title} — SKIPPED: {adm0_iso3} File '{file_name}' not found"
         print(msg)
     except ValueError:
-        msg = f"{base_title} — SKIPPED: Sheet '{country_iso3}' not found"
+        msg = f"{base_title} — SKIPPED: {adm0_iso3} Sheet '{country_iso3}' not found"
         print(msg)
     except Exception as e:
-        msg = f"{base_title} — SKIPPED: Error processing sheet '{country_iso3}': {e}"
+        msg = f"{base_title} — SKIPPED: {adm0_iso3} Error processing sheet '{country_iso3}': {e}"
+        failed_icp_floods.append(msg)
         print(msg)
 
     return {
@@ -810,37 +813,45 @@ def extract_top10_by_cropland(country_iso3, file_name="IPC_multicountry_20250707
 
 def residency_sample_size_summary(df):
     """
-    Summarizes and prints the sample size by residency status,
-    ensuring consistent integer comparisons.
+    Returns a clean 2-column DataFrame showing the sample size by residency group.
     """
     # Load official residency labels from metadata
     residency_labels = get_indicator_info('hh_residencetype').get("codes", {})
 
-    # Ensure hh_residencetype is numeric (convert errors to NaN)
+    # Ensure hh_residencetype is numeric
     df = df.copy()
     df["hh_residencetype"] = pd.to_numeric(df["hh_residencetype"], errors="coerce").astype("Int64")
 
-    results = []
+    rows = []
     total = 0
 
     for code_str, label in residency_labels.items():
+        if label in ["Don't know", "Refused"]:
+            continue
         try:
             code = int(code_str)
         except ValueError:
             continue
 
         count = df[df["hh_residencetype"] == code].shape[0]
-        results.append(f"{label}: {count}")
+        rows.append({
+            "Residency group": label,
+            "Sample size": count
+        })
         total += count
 
-    summary_text = f"Sample size by residency status – Total: {total} | " + " | ".join(results)
-    print(summary_text)
+    # Print summary in console
+    # print("Sample size by residency status – Total:", total)
+    # for row in rows:
+    #     print(f"{row['Residency group']}: {row['Sample size']}")
 
     return {
-        "title": "Sample size by residency status",
-        "metadata": None,
-        "df": pd.DataFrame({"Message": [summary_text]})
+        "title": "Sample size by residency status. The next three tables and charts will be based on the residency status of the household. In some cases, specific groups may be underrepresented; therefore, the analysis outcomes should be interpreted with caution.",
+        "metadata": f"Total sample size: {total}",
+        "df": pd.DataFrame(rows)
     }
+
+
 
 # === LOAD CSV ===
 
@@ -848,19 +859,19 @@ def residency_sample_size_summary(df):
 csv_path = r"C:\git\crossview_processing\DIEM_micro20250703.csv"
 
 df_all = pd.read_csv(csv_path)
-
+failed_icp_floods = []
 # === Main loop ===
 for survey in survey_list:
     adm0_iso3 = survey["adm0_iso3"]
     adm0_name = survey["adm0_name"]
     round_num = survey["round_num"]
     coll_end_date = survey["coll_end_date"]
-    print("Processing %s r%s" % (adm0_iso3, adm0_name))
+    print("Processing %s R%s" % (adm0_iso3, round_num))
 # for survey in survey_list:
 #     adm0_iso3 = survey["adm0_iso3"]
 #     round_num = survey["round_num"]
     df = df_all[(df_all["adm0_iso3"] == adm0_iso3) & (df_all["round"] == round_num)]
-    print(f"Fetched {len(df)} records for {adm0_iso3} round {round_num}.")
+    # print(f"Fetched {len(df)} records for {adm0_iso3} round {round_num}.")
 
 
 
@@ -868,55 +879,72 @@ for survey in survey_list:
     result_dfs = []
 
     # #FIES by agricultural dependancy simplified
+    print('FIES by agricultural dependancy simplified')
     result_dfs.append(fies_by_simplified_agriculture(df))
     # #FIES by agricultural dependancy
+    print('FIES by agricultural dependancy')
     result_dfs.append(fies_by_indicator("fies_hhtype", df))
     if "hh_residencetype" in df.columns and df["hh_residencetype"].dropna().any():
         result_dfs.append(residency_sample_size_summary(df))
         ##FIES by residency status
+        print('FIES by residency status')
         result_dfs.append(fies_by_indicator("fies_resid", df))
         # #agricultural dependancy simplified by residency status
+        print('agricultural dependancy simplified by residency status')
         result_dfs.append(simplified_dependency_by_residency(df))
         # #agricultural dependancy by residency status
+        print('agricultural dependancy by residency status')
         result_dfs.append(agricultural_dependency(df))
     else:
         msg = "This survey did not contain a question on residency status (hh_residencetype), so residency-based analysis was skipped."
-        print(msg)
+        #print(msg)
         result_dfs.append({
             "title": "Residency-based analysis",
             "metadata": None,
             "df": pd.DataFrame({"Message": [msg]})
         })
     # # Needs summary grouped, using previous round, and custom universe
-    needs_res = needs_summary_grouped(df_all, adm0_iso3, round_num,use_grouping=True, use_previous_round=True,universe_filter=[0, 1, 888])
-    # # Assistance summary (grouped)
-    assistance_res = assistance_summary(    df, use_grouping=True,universe_filter=[0, 1, 888],round_num=round_num,adm0_iso3=adm0_iso3)
-    result_dfs.append(needs_res)
-    result_dfs.append(assistance_res)
-    # Append comparison
-    result_dfs.append(compare_needs_vs_assistance(needs_res, assistance_res))
-    # Grouped by received assistance type
-    if "assistance_quality" in df.columns and df["assistance_quality"].dropna().any():
-        result_dfs.append(assistance_quality_summary(df, group_by="need_received"))
+    if adm0_iso3 in ['PSE']:
+        print ("WARNING: Skipping Needs Analysis for PSE since a non standard questionnaire was used")
     else:
-        msg = "This survey did not contain a question on quality of assistance, so analysis on assistance satisfaction was skipped."
-        print(msg)
-        result_dfs.append({
-            "title": "Satisfaction with assistance by group of assistance received",
-            "metadata": None,
-            "df": pd.DataFrame({"Message": [msg]})
-        })
-    #IPC and flood exposure
-    result_dfs.append(extract_top10_by_cropland(adm0_iso3))
+        print('Needs summary grouped, using previous round')
+        needs_res = needs_summary_grouped(df_all, adm0_iso3, round_num,use_grouping=True, use_previous_round=True,universe_filter=[0, 1, 888])
+        # # Assistance summary (grouped)
+        print('Assistance summary (grouped)')
+        assistance_res = assistance_summary(    df, use_grouping=True,universe_filter=[0, 1, 888],round_num=round_num,adm0_iso3=adm0_iso3)
+        result_dfs.append(needs_res)
+        result_dfs.append(assistance_res)
+        # Append comparison
+        print('Comparison previous needs VS assistance')
+        result_dfs.append(compare_needs_vs_assistance(needs_res, assistance_res))
+        # Grouped by received assistance type
+        if "assistance_quality" in df.columns and df["assistance_quality"].dropna().any():
+            print('Assistance quality')
+            result_dfs.append(assistance_quality_summary(df, group_by="need_received"))
+        else:
+            msg = "This survey did not contain a question on quality of assistance, so analysis on assistance satisfaction was skipped."
+            # print(msg)
+            result_dfs.append({
+                "title": "Satisfaction with assistance by group of assistance received",
+                "metadata": None,
+                "df": pd.DataFrame({"Message": [msg]})
+            })
+
+
+    try:
+        print('IPC and flood exposure')
+        result_dfs.append(extract_top10_by_cropland(adm0_iso3))
+    except:
+        print ('FAILED IPC TABLE INSERTION')
+        failed_icp_floods.append(adm0_iso3)
 
 
     # Print results
-    for res in result_dfs:
-        print(f"\n=== {res['title']} ===")
-        if "metadata" in res:
-            print(res["metadata"])
-        print()
-        print(res["df"])
+    # for res in result_dfs:
+    #     # print(f"\n=== {res['title']} ===")
+    #     if "metadata" in res:
+    #         print(res["metadata"])
+    #     print(res["df"])
 
     if export_csv:
         from openpyxl import Workbook
@@ -930,7 +958,7 @@ for survey in survey_list:
         ws.title = "DIEM Surveys analysis"
 
         # Set wider column widths for A–E
-        for col in ["A", "B", "C", "D", "E"]:
+        for col in ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J","K","L","M",'N']:
             ws.column_dimensions[col].width = 24
 
         current_row = 1
@@ -961,7 +989,9 @@ for survey in survey_list:
         for i, result in enumerate(result_dfs):
             if i > 0:
                 current_row += 15  # space between tables
-
+            #deals with a special case of a missing flood exposure
+            if 'is empty' in result["title"].lower():
+                continue #we are dealing with a country with no flood exposure data
             # Title and metadata
             if "title" in result:
                 ws.cell(row=current_row, column=1, value=result["title"])
@@ -973,11 +1003,32 @@ for survey in survey_list:
 
             df = result["df"].reset_index()
 
-            # === If result is a 1-row message that includes 'skipped', print explanation and skip table/chart
-            if df.shape == (1, 2) and "skipped" in str(df.iloc[0, 1]).lower():
-                skip_reason = str(df.iloc[0, 1])
-                ws.cell(row=current_row, column=1, value=skip_reason)
+            # === Handle special cases:
+            # skip chart and optionally skip full table rendering
+            contains_chart = True
+            if (
+                    df.shape[1] == 3 and df.columns.tolist() == ['index', 'Residency group', 'Sample size']
+                    and "sample size by residency status" in result["title"].lower()
+            ):
+                # Write the table as normal
+                table_cols = list(df.columns)
+                for row_idx, row in enumerate(dataframe_to_rows(df, index=False, header=True)):
+                    for col_idx, val in enumerate(row, 1):
+                        cell = ws.cell(row=current_row, column=col_idx, value=val)
+                        cell.border = thin_border
+                    current_row += 1
+
+                # Do NOT generate chart for this table
+                contains_chart = False
+                continue
+            # === Legacy case: single-row skipped messages
+            if df.shape == (1, 2) and (
+                    "skipped" in str(df.iloc[0, 1]).lower()
+            ):
+                message_text = str(df.iloc[0, 1])
+                ws.cell(row=current_row, column=1, value=message_text)
                 current_row += 2
+                contains_chart = False
                 continue
 
             # Create truncated label column for chart X-axis
@@ -1085,7 +1136,10 @@ for survey in survey_list:
                     chart_position = f"B{chart_row}"
 
                     ws.add_chart(chart, chart_position)
-                    current_row = chart_row + 7
+                    if contains_chart:
+                        current_row = chart_row + 7
+                    else:
+                        current_row = chart_row - 10
 
         # Create the output directory if it does not exist
         output_dir = "outputs_for_erps"
@@ -1095,3 +1149,5 @@ for survey in survey_list:
         output_path = os.path.join(output_dir, f"DIEM_survey_analysis_ERPs_202507_{adm0_iso3}_{round_num}.xlsx")
         wb.save(output_path)
         print(f"\nExported grouped analysis with adaptive chart layout to: {output_path}")
+
+print('Failed IPC and flood exposure for %s' % failed_icp_floods)
