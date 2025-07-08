@@ -60,10 +60,10 @@ selected_countries = [
     "MWI",  # Malawi
     "ZWE"   # Zimbabwe
 ]
-# selected_countries = [
-#     "BGD"]
+selected_countries = [
+    "BGD"]
 
-get_updated_list_of_surveys_from_AGOL = True
+get_updated_list_of_surveys_from_AGOL = False
 
 if get_updated_list_of_surveys_from_AGOL == False:
     # survey_list =[{ 'adm0_iso3': 'AFG', 'adm0_name': 'Afghanistan', 'round_num': 10, 'coll_end_date': Timestamp('2024-07-10 00:00:00')},
@@ -90,9 +90,9 @@ if get_updated_list_of_surveys_from_AGOL == False:
         'adm0_name': 'Afghanistan',
         'coll_end_date': pd.Timestamp('2025-01-14 00:00:00'),
         'round_num': 10
-    }
-]
+    }]
 
+    survey_list = [item for item in survey_list if item['adm0_iso3'] in selected_countries]
 
 else:
     # Feature layer URL (Layer 0)
@@ -921,7 +921,6 @@ for survey in survey_list:
 
         title_string = f"DIEM surveys analysis for ERPs – {adm0_name} – Round {round_num} – Data collection ended on {coll_end_date}"
         ws.cell(row=current_row, column=1, value=title_string)
-
         ws.cell(row=current_row, column=1).font = Font(size=14, bold=True)
         current_row += 2  # leave a blank row after main title
 
@@ -944,7 +943,7 @@ for survey in survey_list:
             if df.shape == (1, 2) and "skipped" in str(df.iloc[0, 1]).lower():
                 skip_reason = str(df.iloc[0, 1])
                 ws.cell(row=current_row, column=1, value=skip_reason)
-                current_row += 2  # leave a line after the message
+                current_row += 2
                 continue
 
             # Create truncated label column for chart X-axis
@@ -972,25 +971,86 @@ for survey in survey_list:
             num_cols = len(table_cols)
             num_rows = df.shape[0]
             if num_cols >= 2:
-                chart = BarChart()
-                chart.type = "col"
-                chart.title = "Chart: " + result["title"]
-                chart.y_axis.title = "Percentage"
-                chart.x_axis.title = df.columns[0]
-                chart.width = 18
-                chart.height = 9
 
-                data = Reference(ws, min_col=2, min_row=start_row, max_col=num_cols, max_row=start_row + num_rows)
-                categories = Reference(ws, min_col=chart_label_col_idx, min_row=start_row + 1, max_row=start_row + num_rows)
+                # === Custom chart for flood exposure table (cropland + population)
+                # === Custom chart for flood exposure table (cropland only, sorted)
+                if result["title"].startswith(
+                        "List of adm2 units in IPC3+ with the highest amount of cropland exposed to floods"):
+                    try:
+                        crop_col_idx = table_cols.index("Cropland exposed (Km2)")
+                        adm2_name_idx = table_cols.index("adm2_name")
+                    except ValueError as e:
+                        print(f"Missing expected column for flood chart: {e}")
+                        continue
 
-                chart.add_data(data, titles_from_data=True)
-                chart.set_categories(categories)
+                    # Extract data from existing table
+                    data_rows = []
+                    for i in range(num_rows):
+                        row_idx = start_row + 1 + i  # Skip header
+                        adm2 = ws.cell(row=row_idx, column=adm2_name_idx + 1).value
+                        crop_val = ws.cell(row=row_idx, column=crop_col_idx + 1).value
+                        data_rows.append((row_idx, adm2, crop_val))
 
-                # Place chart 2 columns after the last table column
-                chart_col = num_cols + 2
-                chart_col_letter = get_column_letter(chart_col)
-                chart_position = f"{chart_col_letter}{start_row}"
-                ws.add_chart(chart, chart_position)
+                    # Sort rows by cropland exposed descending
+                    sorted_rows = sorted(data_rows, key=lambda x: (x[2] if x[2] is not None else 0), reverse=True)
+
+                    # Prepare references to the sorted row indexes
+                    sorted_row_indices = [r[0] for r in sorted_rows]
+
+                    # Create chart data and category references using sorted order
+                    categories = Reference(ws, min_col=adm2_name_idx + 1,
+                                           min_row=sorted_row_indices[0],
+                                           max_row=sorted_row_indices[-1])
+                    crop_data = Reference(ws, min_col=crop_col_idx + 1,
+                                          min_row=sorted_row_indices[0] - 1,  # include header
+                                          max_row=sorted_row_indices[-1])
+
+                    # Create chart
+                    chart_crop = BarChart()
+                    chart_crop.type = "col"
+                    chart_crop.grouping = "clustered"
+                    chart_crop.title = "Flood exposure: cropland only (top 10 adm2 in IPC3+)"
+                    chart_crop.x_axis.title = "Admin2 unit"
+                    chart_crop.y_axis.title = "Cropland exposed (Km²)"
+                    chart_crop.y_axis.majorGridlines = None
+                    chart_crop.width = 18
+                    chart_crop.height = 9
+
+                    chart_crop.add_data(crop_data, titles_from_data=True)
+                    chart_crop.set_categories(categories)
+
+                    # Insert into sheet
+                    chart_row = current_row + 2
+                    chart_position = f"B{chart_row}"
+                    ws.add_chart(chart_crop, chart_position)
+
+                    # Advance row counter
+                    current_row = chart_row + 20
+
+
+
+                # === Default chart for all other tables
+                else:
+                    chart = BarChart()
+                    chart.type = "col"
+                    chart.title = "Chart: " + result["title"]
+                    chart.y_axis.title = "Percentage"
+                    chart.x_axis.title = df.columns[0]
+                    chart.width = 18
+                    chart.height = 9
+
+                    data = Reference(ws, min_col=2, min_row=start_row,
+                                     max_col=num_cols, max_row=start_row + num_rows)
+                    categories = Reference(ws, min_col=chart_label_col_idx,
+                                           min_row=start_row + 1, max_row=start_row + num_rows)
+
+                    chart.add_data(data, titles_from_data=True)
+                    chart.set_categories(categories)
+
+                    chart_col = num_cols + 2
+                    chart_col_letter = get_column_letter(chart_col)
+                    chart_position = f"{chart_col_letter}{start_row}"
+                    ws.add_chart(chart, chart_position)
 
         # Create the output directory if it does not exist
         output_dir = "outputs_for_erps"
@@ -1000,4 +1060,3 @@ for survey in survey_list:
         output_path = os.path.join(output_dir, f"DIEM_survey_analysis_ERPs_202507_{adm0_iso3}_{round_num}.xlsx")
         wb.save(output_path)
         print(f"\nExported grouped analysis with adaptive chart layout to: {output_path}")
-
