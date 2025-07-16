@@ -27,12 +27,12 @@ survey_details = [['AFG', 10, 'All 34 Province are covered'], ['BFA', 3, '29 Pro
 
 countries_ipc_json = ["AFG", "BGD", "CAF", "COD", "SLV", "GTM", "HTI", "HND", "LBN", "MOZ", "YEM", "PAK", "MWI", "ZWE"]
 countries_excel_only = ["CMR", "TCD", "MLI", "NER", "NGA"]
-countries_none = ["COL", "MMR", "PSE", "IRQ"]
+countries_none = ["COL", "MMR", "PSE", "IRQ", "BFA"]
 
 for survey_detail in survey_details:
     adm0_iso3, round, diem_survey_coverage = survey_detail
-    if adm0_iso3 not in ["COD"]:
-        pass
+    if adm0_iso3 not in [ "TCD"]:
+        continue
     print('Creating IPC/CH maps for %s R%s' % (adm0_iso3, round))
     if adm0_iso3 in countries_ipc_json:
         try:
@@ -192,6 +192,141 @@ for survey_detail in survey_details:
             print(f"   ➤ Code: {tb.line}")
             print(f"   ➤ Error: {type(e).__name__} - {e}")
     elif adm0_iso3 in countries_excel_only:
-        print("excel process to implement")
+        try:
+            print(f"Processing IPC data from Excel for {adm0_iso3} R{round}")
+
+            # === Load IPC data from Excel ===
+            ipc_excel_file = "IPC_multicountry_20250707.xlsx"
+            ipc_excel_path = os.path.join(os.path.dirname(__file__), ipc_excel_file)
+            ipc_df = pd.read_excel(ipc_excel_path, sheet_name=adm0_iso3)
+
+            phase_columns = [
+                "area_phase_proj2",
+                "area_phase_proj1",
+                "area_phase_current"
+            ]
+
+            period_fields = {
+                "area_phase_proj2": "analysis_period_proj2",
+                "area_phase_proj1": "analysis_period_proj1",
+                "area_phase_current": "analysis_period_current"
+            }
+
+            ipc_phase_styles = {
+                1: {"color": (205/255, 250/255, 205/255), "label": "Phase 1 (Minimal/None)"},
+                2: {"color": (250/255, 230/255, 30/255), "label": "Phase 2 (Alert/Stressed)"},
+                3: {"color": (230/255, 120/255, 0/255), "label": "Phase 3 (Serious/Crisis)"},
+                4: {"color": (200/255, 0/255, 0/255), "label": "Phase 4 (Critical/Emergency)"},
+                5: {"color": (100/255, 0/255, 0/255), "label": "Phase 5 (Extremely Critical/Famine)"}
+            }
+
+            # === Load background admin1 layer ===
+            bkg_layer = FeatureLayer("https://services5.arcgis.com/sjP4Ugu5s0dZWLjd/arcgis/rest/services/Administrative_Boundaries_Reference_(view_layer)/FeatureServer/0")
+            bkg_result = bkg_layer.query(where=f"adm0_iso3 = '{adm0_iso3}' AND validity = 'yes'", out_fields='*', return_geometry=True)
+
+            bkg_records = []
+            for feat in bkg_result.features:
+                geom = feat.geometry
+                if geom and "rings" in geom:
+                    geojson_geom = {"type": "Polygon", "coordinates": geom["rings"]}
+                    attr = feat.attributes
+                    attr["geometry"] = shape(geojson_geom)
+                    bkg_records.append(attr)
+
+            if not bkg_records:
+                raise ValueError("No valid background features for admin1.")
+
+            bkg_gdf = gpd.GeoDataFrame(bkg_records, geometry="geometry", crs="EPSG:4326")
+
+            # === Load DIEM survey coverage layer ===
+            main_layer = FeatureLayer("https://services5.arcgis.com/sjP4Ugu5s0dZWLjd/arcgis/rest/services/diem_adm_repr_1_mview/FeatureServer/29")
+            main_result = main_layer.query(
+                where=f"adm0_iso3 = '{adm0_iso3}' AND round = {round} AND surveys > 2",
+                out_fields='*',
+                return_geometry=True
+            )
+
+            main_records, coll_end_date = [], ""
+            for feat in main_result.features:
+                geom = feat.geometry
+                if geom and "rings" in geom:
+                    geojson_geom = {"type": "Polygon", "coordinates": geom["rings"]}
+                    attr = feat.attributes
+                    attr["geometry"] = shape(geojson_geom)
+                    if not coll_end_date and "coll_end_date" in attr and attr["coll_end_date"]:
+                        coll_end_date = datetime.utcfromtimestamp(attr["coll_end_date"] / 1000).strftime("%b %Y")
+                    main_records.append(attr)
+
+            main_gdf = gpd.GeoDataFrame(main_records, geometry="geometry", crs="EPSG:4326") if main_records else None
+
+            # === Identify which IPC phases are available ===
+            available_phases = []
+            for col in reversed(phase_columns):  # current, proj1, proj2
+                if col in ipc_df.columns and ipc_df[col].notna().any():
+                    available_phases.append(col)
+
+            if not available_phases:
+                raise ValueError("No usable IPC phase column found in Excel.")
+
+            # === Create subplots based on available phases ===
+            ncols = len(available_phases)
+            fig, axes = plt.subplots(1, ncols, figsize=(10 * ncols, 10))
+            if ncols == 1:
+                axes = [axes]
+
+            for idx, col in enumerate(available_phases):
+                ax = axes[idx]
+
+                df_phase = ipc_df[["adm1_pcode", col, period_fields[col]]].dropna()
+                df_phase = df_phase.rename(columns={col: "phase", period_fields[col]: "reference_period"})
+                df_phase["phase"] = df_phase["phase"].astype(int)
+
+                merged_gdf = bkg_gdf.merge(df_phase, on="adm1_pcode")
+
+                bkg_gdf.plot(ax=ax, edgecolor="black", facecolor="none", linewidth=0.5)
+
+                for phase_value, style in ipc_phase_styles.items():
+                    subset = merged_gdf[merged_gdf["phase"] == phase_value]
+                    if not subset.empty:
+                        subset.plot(ax=ax, facecolor=style["color"], edgecolor="black", linewidth=0.5, alpha=0.6, label=style["label"])
+
+                if main_gdf is not None:
+                    main_gdf.plot(ax=ax, facecolor='none', edgecolor='red', hatch='/', linewidth=0, alpha=0.7)
+
+                label_map = {
+                    "area_phase_current": "Current situation",
+                    "area_phase_proj1": "First projection",
+                    "area_phase_proj2": "Second projection"
+                }
+                period_text = df_phase["reference_period"].dropna().iloc[0]
+                ax.set_title(f"DIEM Monitoring Survey Round {round} ({coll_end_date}) and IPC acute food insecurity\n{label_map[col]} ({period_text})", fontsize=13)
+                ax.set_axis_off()
+
+            # === Legend and export ===
+            legend_elements = [Patch(facecolor=style["color"], edgecolor='black', label=style["label"], alpha=0.6)
+                               for style in ipc_phase_styles.values()]
+            legend_elements.append(Patch(facecolor='none', edgecolor='crimson',
+                                         label=f'DIEM Monitoring Survey Round {round} coverage',
+                                         hatch='//', linewidth=1))
+
+            fig.subplots_adjust(bottom=0.25)
+            bottom_ax = fig.add_axes([0.1, 0.01, 0.8, 0.12])
+            bottom_ax.axis("off")
+            bottom_ax.legend(handles=legend_elements, loc='upper center', ncol=3, fontsize='medium', frameon=False,
+                             bbox_to_anchor=(0.5, 1.0), handlelength=2.5, handleheight=1.5, borderpad=1.0, labelspacing=0.8)
+
+            output_file = f"map_{adm0_iso3.lower()}_round{round}_ipc_excel_multi.png"
+            plt.savefig(output_file, bbox_inches='tight')
+            plt.close()
+            print(f"✅ Excel-based IPC multi-phase map saved to: {output_file}")
+
+        except Exception as e:
+            import traceback
+            tb = traceback.extract_tb(e.__traceback__)[-1]
+            print(f"❌ Failed for {adm0_iso3} at line {tb.lineno} in Excel-based IPC process")
+            print(f"   ➤ Code: {tb.line}")
+            print(f"   ➤ Error: {type(e).__name__} - {e}")
+
+
     else:
         print("No IPC/CH data available since it's in this list", countries_none)
