@@ -11,6 +11,8 @@ from datetime import datetime
 # Connect to ArcGIS Online
 gis = GIS()
 
+##dict below is done by using variable survey_list in line 93 of script perform_crosstabs_ERPs
+# and then applying this command in console survey_pairs = [[s['adm0_iso3'], s['round_num']], s['diem_survey_coverage']] for s in survey_list]
 survey_details = [['AFG', 10, 'All 34 Province are covered'], ['BFA', 3, '29 Provinces covered out of 45'],
                   ['BGD', 12, 'All 64 District are covered'], ['CAF', 6, '23 Sous-Préfecture covered out of 72'],
                   ['CMR', 7, 'All 10 Adamawa, Centre, East, Far North, Littoral, North, North-West, South, South-West, West are covered'],
