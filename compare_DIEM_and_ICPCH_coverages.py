@@ -33,7 +33,7 @@ countries_none = ["COL", "MMR", "PSE", "IRQ", "BFA"]
 
 for survey_detail in survey_details:
     adm0_iso3, round, diem_survey_coverage = survey_detail
-    if adm0_iso3 not in [ "TCD"]:
+    if adm0_iso3 not in ["CMR", "TCD", "MLI", "NER", "NGA"]:
         continue
     print('Creating IPC/CH maps for %s R%s' % (adm0_iso3, round))
     if adm0_iso3 in countries_ipc_json:
@@ -78,7 +78,7 @@ for survey_detail in survey_details:
             ipc_gdf = ipc_gdf[ipc_gdf.geometry.type.isin(["Polygon", "MultiPolygon"])]
             if ipc_gdf.empty:
                 raise ValueError("Empty IPC GeoJSON.")
-            if adm0_iso3 in ["GTM", "HND", "SLV"]:
+            if adm0_iso3 in ["GTM", "HND", "SLV"]: #data is coming from a regional LAC file
                 ipc_gdf = gpd.clip(ipc_gdf, bkg_gdf)
 
             has_current = "overall_phase_C" in ipc_gdf.columns and ipc_gdf["overall_phase_C"].notna().any()
@@ -107,7 +107,7 @@ for survey_detail in survey_details:
                     if not subset.empty:
                         subset.plot(ax=ax, facecolor=style["color"], edgecolor='black',
                                     linewidth=0.5, alpha=0.6, label=style["label"])
-                main_gdf.plot(ax=ax, facecolor='none', edgecolor='red', hatch='/', linewidth=0, alpha=0.7)
+                main_gdf.plot(ax=ax, facecolor='none', edgecolor='red', hatch='//', linewidth=0, alpha=0.9)
                 ax.set_title(title, fontsize=13)
                 ax.set_axis_off()
 
@@ -222,7 +222,7 @@ for survey_detail in survey_details:
                 5: {"color": (100/255, 0/255, 0/255), "label": "Phase 5 (Extremely Critical/Famine)"}
             }
 
-            # === Load background admin1 layer ===
+            # === Load background admin2 layer ===
             bkg_layer = FeatureLayer("https://services5.arcgis.com/sjP4Ugu5s0dZWLjd/arcgis/rest/services/Administrative_Boundaries_Reference_(view_layer)/FeatureServer/0")
             bkg_result = bkg_layer.query(where=f"adm0_iso3 = '{adm0_iso3}' AND validity = 'yes'", out_fields='*', return_geometry=True)
 
@@ -279,21 +279,22 @@ for survey_detail in survey_details:
             for idx, col in enumerate(available_phases):
                 ax = axes[idx]
 
-                df_phase = ipc_df[["adm1_pcode", col, period_fields[col]]].dropna()
+                df_phase = ipc_df[["adm2_pcode", col, period_fields[col]]].dropna()
                 df_phase = df_phase.rename(columns={col: "phase", period_fields[col]: "reference_period"})
                 df_phase["phase"] = df_phase["phase"].astype(int)
 
-                merged_gdf = bkg_gdf.merge(df_phase, on="adm1_pcode")
+                merged_gdf = bkg_gdf.merge(df_phase, on="adm2_pcode")
 
                 bkg_gdf.plot(ax=ax, edgecolor="black", facecolor="none", linewidth=0.5)
 
                 for phase_value, style in ipc_phase_styles.items():
                     subset = merged_gdf[merged_gdf["phase"] == phase_value]
                     if not subset.empty:
-                        subset.plot(ax=ax, facecolor=style["color"], edgecolor="black", linewidth=0.5, alpha=0.6, label=style["label"])
+                        #subset.plot(ax=ax, facecolor=style["color"], edgecolor="black", linewidth=0.5, alpha=0.6, label=style["label"])
+                        subset.plot(ax=ax, facecolor=style["color"], edgecolor="black", linewidth=0.5, alpha=1.0, label=style["label"])
 
                 if main_gdf is not None:
-                    main_gdf.plot(ax=ax, facecolor='none', edgecolor='red', hatch='/', linewidth=0, alpha=0.7)
+                    main_gdf.plot(ax=ax, facecolor='none', edgecolor='red', hatch='//', linewidth=0, alpha=0.9)
 
                 label_map = {
                     "area_phase_current": "Current situation",
