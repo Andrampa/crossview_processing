@@ -8,32 +8,69 @@ import os
 from matplotlib.patches import Patch
 from datetime import datetime
 
+
+# === Functions to check coverage if not national ===
+def is_meaningfully_covered(ipc_geom, diem_geoms):
+    for diem_geom in diem_geoms:
+        if ipc_geom.intersects(diem_geom):
+            try:
+                intersection_area = ipc_geom.intersection(diem_geom).area
+                if intersection_area / ipc_geom.area >= 0.15:
+                    return True
+            except:
+                try:
+                    fixed_ipc = ipc_geom.buffer(0)
+                    fixed_diem = diem_geom.buffer(0)
+                    if fixed_ipc.intersects(fixed_diem):
+                        intersection_area = fixed_ipc.intersection(fixed_diem).area
+                        if intersection_area / fixed_ipc.area >= 0.15:
+                            return True
+                except:
+                    continue
+    return False
+
+def count_covered_geoms(gdf, diem_geoms):
+    ipc3plus = gdf[gdf["phase"] >= 3]
+    n_total = ipc3plus.shape[0]
+    n_covered = ipc3plus.geometry.apply(lambda g: is_meaningfully_covered(g, diem_geoms)).sum()
+    return n_total, n_covered
+
+def count_covered(phase_col):
+    df = ipc_gdf[[phase_col, "geometry"]].dropna(subset=[phase_col])
+    df = df.rename(columns={phase_col: "phase"}).to_crs(main_gdf.crs)
+    return count_covered_geoms(df, main_gdf.geometry)
+
+# Define output directory
+output_dir = os.path.join(os.getcwd(), "outputs_for_erps", "coverage_maps")
+os.makedirs(output_dir, exist_ok=True)  # create directory if it does not exist
+
 # Connect to ArcGIS Online
 gis = GIS()
 
 ##dict below is done by using variable survey_list in line 93 of script perform_crosstabs_ERPs
-# and then applying this command in console survey_pairs = [[s['adm0_iso3'], s['round_num']], s['diem_survey_coverage']] for s in survey_list]
-survey_details = [['AFG', 10, 'All 34 Province are covered'], ['BFA', 3, '29 Provinces covered out of 45'],
-                  ['BGD', 12, 'All 64 District are covered'], ['CAF', 6, '23 Sous-Préfecture covered out of 72'],
-                  ['CMR', 7, 'All 10 Adamawa, Centre, East, Far North, Littoral, North, North-West, South, South-West, West are covered'],
-                  ['COD', 9, '5 Provinces covered out of 26'], ['COL', 6, '13 Department covered out of 32'],
-                  ['GTM', 4, 'All 22 provinces are covered'], ['HND', 4, 'All 18 Department are covered'],
-                  ['HTI', 6, 'All 10 Departement are covered'], ['IRQ', 13, 'All 18 Governorate are covered'],
-                  ['LBN', 8, '25 Districts covered out of 26'], ['MLI', 9, '8 Region covered out of 10'],
-                  ['MMR', 11, '13 State/Region covered out of 15'], ['MOZ', 7, '9 Provinces covered out of 11'],
-                  ['MWI', 1, '28 Districts covered out of 32'], ['NER', 10, '7 Regions covered out of 8'],
-                  ['NGA', 7, '5 State For Admin 1, Local Government Areas For Admin 2 covered out of 37'],
-                  ['PAK', 6, '25 District covered out of 161'], ['PSE', 1, '9 Governorates covered out of 14'],
-                  ['TCD', 8, '19 Departement covered out of 70'], ['YEM', 28, 'All 22 Governorates are covered'],
-                  ['ZWE', 10, '8 Province covered out of 10']]
+# and then applying this command in console survey_pairs = [[s['adm0_iso3'], s['round_num'], s['diem_survey_coverage'], s['adm0_name'], s['diem_target_pop']] for s in survey_list]
+survey_details = [['AFG',  10,  'All 34 Province are covered',  'Afghanistan',  'Target: Rural population'], ['BFA',  3,  '29 Provinces covered out of 45',  'Burkina Faso',
+  'Target: Rural population'], ['BGD',  12,  'All 64 District are covered',  'Bangladesh',  'Target: Entire population'], ['CAF',  6,  '23 Sous-Préfecture covered out of 72',  'Central African Republic',
+  'Target: Entire population'], ['CMR',  7,  'All 10 Adamawa, Centre, East, Far North, Littoral, North, North-West, South, South-West, West are covered',
+  'Cameroon',  'Target: Entire population'], ['COD',  9,  '5 Provinces covered out of 26',  'Democratic Republic of the Congo',  'Target: Entire population'],
+ ['COL',  6,  '13 Department covered out of 32',  'Colombia',  'Target: Rural population'], ['GTM',  4,  'All 22 provinces are covered',  'Guatemala',  'Target: under review'],
+ ['HND',  4,  'All 18 Department are covered',  'Honduras',  'Target: Entire population'], ['HTI',  6,  'All 10 Departement are covered',  'Haiti',  'Target: Entire population'],
+ ['IRQ',  13,  'All 18 Governorate are covered',  'Iraq',  'Target: Entire population'], ['LBN',  8,  '25 Districts covered out of 26',  'Lebanon',  'Target: Agricultural population'],
+ ['MLI', 9, '8 Region covered out of 10', 'Mali', 'Target: Rural population'], ['MMR',  11,  '13 State/Region covered out of 15',  'Myanmar',  'Target: Entire population'],
+ ['MOZ',  7,  '9 Provinces covered out of 11',  'Mozambique',  'Target: Rural population'], ['MWI',  1,  '28 Districts covered out of 32',  'Malawi',  'Target: Agricultural population'],
+['NER',  10,  '7 Regions covered out of 8',  'Niger',  'Target: Rural population'], ['NGA',  7,  '5 provinces covered out of 37',  'Nigeria',  'Target: Entire population'],
+ ['PAK',  6,  '25 District covered out of 161',  'Pakistan',  'Target: Rural population'], ['PSE',  1,  '9 Governorates covered out of 14',  'Palestine',  'Target: Agricultural population'],
+ ['TCD',  8,  '19 Departement covered out of 70',  'Chad',  'Target: Rural population'], ['YEM',  28,  'All 22 Governorates are covered',  'Yemen',  'Target: Entire population'],
+ ['ZWE',  10,  '8 Province covered out of 10',  'Zimbabwe',  'Target: Rural population']]
 
-countries_ipc_json = ["AFG", "BGD", "CAF", "COD", "SLV", "GTM", "HTI", "HND", "LBN", "MOZ", "YEM", "PAK", "MWI", "ZWE"]
-countries_excel_only = ["CMR", "TCD", "MLI", "NER", "NGA"]
+countries_ipc_json = ["AFG", "BGD", "CAF", "COD", "SLV", "HTI", "LBN", "MOZ", "YEM", "PAK", "MWI", "ZWE"]
+countries_excel_only = ["CMR", "TCD", "MLI", "NER", "GTM", "NGA", "HND", "SLV"]
+countries_ipc_adm1 = ["GTM", "HND", "SLV"]
 countries_none = ["COL", "MMR", "PSE", "IRQ", "BFA"]
 
 for survey_detail in survey_details:
-    adm0_iso3, round, diem_survey_coverage = survey_detail
-    if adm0_iso3 not in ["CMR", "TCD", "MLI", "NER", "NGA"]:
+    adm0_iso3, round, diem_survey_coverage, adm0_name, diem_target_pop = survey_detail
+    if adm0_iso3 not in ["NER"]:
         continue
     print('Creating IPC/CH maps for %s R%s' % (adm0_iso3, round))
     if adm0_iso3 in countries_ipc_json:
@@ -78,8 +115,7 @@ for survey_detail in survey_details:
             ipc_gdf = ipc_gdf[ipc_gdf.geometry.type.isin(["Polygon", "MultiPolygon"])]
             if ipc_gdf.empty:
                 raise ValueError("Empty IPC GeoJSON.")
-            if adm0_iso3 in ["GTM", "HND", "SLV"]: #data is coming from a regional LAC file
-                ipc_gdf = gpd.clip(ipc_gdf, bkg_gdf)
+
 
             has_current = "overall_phase_C" in ipc_gdf.columns and ipc_gdf["overall_phase_C"].notna().any()
             has_projection = "overall_phase_P" in ipc_gdf.columns and ipc_gdf["overall_phase_P"].notna().any()
@@ -90,6 +126,10 @@ for survey_detail in survey_details:
             fig, axes = plt.subplots(1, ncols, figsize=(10 * ncols, 10))
             if ncols == 1:
                 axes = [axes]
+
+            # Add overall title on top
+            fig.suptitle(f"{adm0_name}: DIEM – IPC coverages", fontsize=18, fontweight='bold', ha='center', y=0.98)
+
             ax_idx = 0
 
             ipc_phase_styles = {
@@ -126,30 +166,8 @@ for survey_detail in survey_details:
                 plot_phase(axes[ax_idx], "overall_phase_A", f"DIEM R{round} ({coll_end_date})\n{second_title}")
 
             annotation_lines = [f"DIEM Survey R{round} coverage: {diem_survey_coverage}"]
+            annotation_lines = [f"DIEM Survey R{round} target population: {diem_target_pop}"]
             if "all" not in diem_survey_coverage.lower():
-
-                def is_meaningfully_covered(ipc_geom):
-                    for diem_geom in main_gdf.geometry:
-                        if ipc_geom.intersects(diem_geom):
-                            try:
-                                intersection_area = ipc_geom.intersection(diem_geom).area
-                                if intersection_area / ipc_geom.area >= 0.15:
-                                    return True
-                            except:
-                                try:
-                                    fixed_ipc = ipc_geom.buffer(0)
-                                    fixed_diem = diem_geom.buffer(0)
-                                    if fixed_ipc.intersects(fixed_diem):
-                                        intersection_area = fixed_ipc.intersection(fixed_diem).area
-                                        if intersection_area / fixed_ipc.area >= 0.15:
-                                            return True
-                                except:
-                                    continue
-                    return False
-
-                def count_covered(phase_col):
-                    df = ipc_gdf[ipc_gdf[phase_col].fillna(0) >= 3].to_crs(main_gdf.crs)
-                    return df.shape[0], df.geometry.apply(is_meaningfully_covered).sum()
 
                 if has_current:
                     n_current, n_cov_current = count_covered("overall_phase_C")
@@ -157,12 +175,13 @@ for survey_detail in survey_details:
 
                 if has_projection:
                     n_proj, n_cov_proj = count_covered("overall_phase_P")
-                    annotation_lines.append(f"1st proj.: Number in IPC3+: {n_proj} (of which covered by DIEM: {n_cov_proj})")
+                    annotation_lines.append(f"IPC first proj.: Number in IPC3+: {n_proj} (of which covered by DIEM: {n_cov_proj})")
 
                 if has_second_projection:
                     n_2nd, n_cov_2nd = count_covered("overall_phase_A")
                     annotation_lines.append(f"Number in IPC3+ (2nd proj.): {n_2nd} (of which covered by DIEM: {n_cov_2nd})")
 
+            annotation_lines.append("")
             annotation_lines.append("Note: figures are indicative, as DIEM and IPC/CH may use different administrative references or levels.")
             annotation_lines.append("All values are automatically derived. For authoritative information, please refer to official DIEM and IPC/CH documentation.")
 
@@ -181,8 +200,7 @@ for survey_detail in survey_details:
                              bbox_to_anchor=(0.5, 1.0), handlelength=2.5, handleheight=1.5, borderpad=1.0, labelspacing=0.8)
             bottom_ax.text(0.0, 0.25, annotation_text, ha='left', va='top', fontsize=12, transform=bottom_ax.transAxes)
 
-            suffix = "_current" if has_current else "_proj" if has_projection else "_2ndproj"
-            output_file = f"map_{adm0_iso3.lower()}_round{round}_diem_ipc{suffix}.png"
+            output_file = os.path.join(output_dir, f"map_{adm0_iso3.lower()}_round{round}_diem_ipc.png")
             plt.savefig(output_file, bbox_inches='tight')
             plt.close()
             print(f"✅ Map saved to: {output_file}")
@@ -223,8 +241,12 @@ for survey_detail in survey_details:
             }
 
             # === Load background admin2 layer ===
-            bkg_layer = FeatureLayer("https://services5.arcgis.com/sjP4Ugu5s0dZWLjd/arcgis/rest/services/Administrative_Boundaries_Reference_(view_layer)/FeatureServer/0")
-            bkg_result = bkg_layer.query(where=f"adm0_iso3 = '{adm0_iso3}' AND validity = 'yes'", out_fields='*', return_geometry=True)
+            if adm0_iso3 in countries_ipc_adm1:
+                bkg_layer = FeatureLayer("https://services5.arcgis.com/sjP4Ugu5s0dZWLjd/arcgis/rest/services/Administrative_Boundaries_Reference_(view_layer)/FeatureServer/1")
+                bkg_result = bkg_layer.query(where=f"adm0_iso3 = '{adm0_iso3}' AND validity = 'yes'", out_fields='*', return_geometry=True)
+            else:
+                bkg_layer = FeatureLayer("https://services5.arcgis.com/sjP4Ugu5s0dZWLjd/arcgis/rest/services/Administrative_Boundaries_Reference_(view_layer)/FeatureServer/0")
+                bkg_result = bkg_layer.query(where=f"adm0_iso3 = '{adm0_iso3}' AND validity = 'yes'", out_fields='*', return_geometry=True)
 
             bkg_records = []
             for feat in bkg_result.features:
@@ -271,19 +293,25 @@ for survey_detail in survey_details:
                 raise ValueError("No usable IPC phase column found in Excel.")
 
             # === Create subplots based on available phases ===
+
             ncols = len(available_phases)
             fig, axes = plt.subplots(1, ncols, figsize=(10 * ncols, 10))
             if ncols == 1:
                 axes = [axes]
+            # Add overall title on top
+            fig.suptitle(f"{adm0_name}: DIEM – IPC/CH coverages", fontsize=18, fontweight='bold', ha='center', y=0.98)
+
+            join_field = "adm2_pcode"
+            if adm0_iso3 in countries_ipc_adm1:
+                join_field = "adm1_pcode"
 
             for idx, col in enumerate(available_phases):
                 ax = axes[idx]
-
-                df_phase = ipc_df[["adm2_pcode", col, period_fields[col]]].dropna()
+                df_phase = ipc_df[[join_field, col, period_fields[col]]].dropna()
                 df_phase = df_phase.rename(columns={col: "phase", period_fields[col]: "reference_period"})
                 df_phase["phase"] = df_phase["phase"].astype(int)
 
-                merged_gdf = bkg_gdf.merge(df_phase, on="adm2_pcode")
+                merged_gdf = bkg_gdf.merge(df_phase, on=join_field)
 
                 bkg_gdf.plot(ax=ax, edgecolor="black", facecolor="none", linewidth=0.5)
 
@@ -305,6 +333,36 @@ for survey_detail in survey_details:
                 ax.set_title(f"DIEM Monitoring Survey Round {round} ({coll_end_date}) and IPC acute food insecurity\n{label_map[col]} ({period_text})", fontsize=13)
                 ax.set_axis_off()
 
+            # === Annotation block ===
+            annotation_lines = [f"DIEM Survey R{round} coverage: {diem_survey_coverage}"]
+            annotation_lines = [f"DIEM Survey R{round} target population: {diem_target_pop}"]
+            if "all" not in diem_survey_coverage.lower():
+                for col in available_phases:
+                    df_phase = ipc_df[[join_field, col, period_fields[col]]].dropna()
+                    df_phase = df_phase.rename(columns={col: "phase", period_fields[col]: "reference_period"})
+                    df_phase["phase"] = df_phase["phase"].astype(int)
+
+                    merged_gdf = bkg_gdf.merge(df_phase, on=join_field)
+                    merged_gdf = merged_gdf.to_crs(main_gdf.crs)
+
+                    n_total, n_covered = count_covered_geoms(merged_gdf, main_gdf.geometry)
+
+                    phase_label = {
+                        "area_phase_current": "Current",
+                        "area_phase_proj1": "First proj.",
+                        "area_phase_proj2": "Second proj."
+                    }.get(col, col)
+
+                    annotation_lines.append(
+                        f"{phase_label}: Number of admin units in IPC3+: {n_total} (of which covered by DIEM: {n_covered})")
+            annotation_lines.append("")
+            annotation_lines.append(
+                "Note: figures are indicative, as DIEM and IPC/CH may use different administrative references or levels.")
+            annotation_lines.append(
+                "All values are automatically derived. For authoritative information, please refer to official DIEM and IPC/CH documentation.")
+
+            annotation_text = "\n".join(annotation_lines)
+
             # === Legend and export ===
             legend_elements = [Patch(facecolor=style["color"], edgecolor='black', label=style["label"], alpha=0.6)
                                for style in ipc_phase_styles.values()]
@@ -318,7 +376,12 @@ for survey_detail in survey_details:
             bottom_ax.legend(handles=legend_elements, loc='upper center', ncol=3, fontsize='medium', frameon=False,
                              bbox_to_anchor=(0.5, 1.0), handlelength=2.5, handleheight=1.5, borderpad=1.0, labelspacing=0.8)
 
-            output_file = f"map_{adm0_iso3.lower()}_round{round}_ipc_excel_multi.png"
+            bottom_ax.text(0.0, 0.25, annotation_text, ha='left', va='top', fontsize=12, transform=bottom_ax.transAxes)
+            ipc_ch_source = "ch"
+            if adm0_iso3 in countries_ipc_adm1:
+                ipc_ch_source = "ipc"
+            output_file = os.path.join(output_dir, f"map_{adm0_iso3.lower()}_round{round}_diem_{ipc_ch_source}.png")
+
             plt.savefig(output_file, bbox_inches='tight')
             plt.close()
             print(f"✅ Excel-based IPC multi-phase map saved to: {output_file}")
