@@ -167,7 +167,7 @@ for survey_detail in survey_details:
 
             annotation_lines = [f"DIEM Survey R{round} coverage: {diem_survey_coverage}"]
             annotation_lines.append(f"DIEM Survey R{round} target population: {diem_target_pop}")
-            
+
             if "all" not in diem_survey_coverage.lower():
 
                 if has_current:
@@ -336,7 +336,7 @@ for survey_detail in survey_details:
 
             # === Annotation block ===
             annotation_lines = [f"DIEM Survey R{round} coverage: {diem_survey_coverage}"]
-            annotation_lines = [f"DIEM Survey R{round} target population: {diem_target_pop}"]
+            annotation_lines.append(f"DIEM Survey R{round} target population: {diem_target_pop}")
             if "all" not in diem_survey_coverage.lower():
                 for col in available_phases:
                     df_phase = ipc_df[[join_field, col, period_fields[col]]].dropna()
