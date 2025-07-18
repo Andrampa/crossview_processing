@@ -70,7 +70,7 @@ countries_none = ["COL", "MMR", "PSE", "IRQ", "BFA"]
 
 for survey_detail in survey_details:
     adm0_iso3, round, diem_survey_coverage, adm0_name, diem_target_pop = survey_detail
-    if adm0_iso3 not in ["NER"]:
+    if adm0_iso3 in ["COL", "MMR", "PSE", "IRQ", "BFA"]:
         continue
     print('Creating IPC/CH maps for %s R%s' % (adm0_iso3, round))
     if adm0_iso3 in countries_ipc_json:
@@ -166,7 +166,8 @@ for survey_detail in survey_details:
                 plot_phase(axes[ax_idx], "overall_phase_A", f"DIEM R{round} ({coll_end_date})\n{second_title}")
 
             annotation_lines = [f"DIEM Survey R{round} coverage: {diem_survey_coverage}"]
-            annotation_lines = [f"DIEM Survey R{round} target population: {diem_target_pop}"]
+            annotation_lines.append(f"DIEM Survey R{round} target population: {diem_target_pop}")
+            
             if "all" not in diem_survey_coverage.lower():
 
                 if has_current:
