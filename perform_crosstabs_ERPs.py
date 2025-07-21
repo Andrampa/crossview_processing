@@ -1,10 +1,14 @@
 import pandas as pd
-import json, os
+import json, os, re, glob, requests
 from arcgis.gis import GIS
 from arcgis.features import FeatureLayer
 import pandas as pd
-import re
+from openpyxl.drawing.image import Image as ExcelImage
+from PIL import Image as PILImage
 
+
+# Path for storing and reusing the survey_list
+survey_list_cache_path = os.path.join(os.path.dirname(__file__), "survey_list_cache.json")
 
 ######### get updated list of surveys to process ###########
 # Filter to keep only selected countries
@@ -38,43 +42,23 @@ selected_countries = [
 # selected_countries = [
 #    'BGD']
 
-get_updated_list_of_surveys_from_AGOL = True
+get_updated_list_of_surveys_from_AGOL = False
 
-if get_updated_list_of_surveys_from_AGOL == False:
-    # survey_list =[{ 'adm0_iso3': 'AFG', 'adm0_name': 'Afghanistan', 'round_num': 10, 'coll_end_date': Timestamp('2024-07-10 00:00:00')},
-    #               { 'adm0_iso3': 'HTI', 'adm0_name': 'Haiti', 'round_num': 6, 'coll_end_date': Timestamp('2024-07-10 00:00:00')}]
-
-    survey_list =[{
-        'adm0_iso3': 'BGD',
-        'adm0_name': 'Bangladesh',
-        'coll_end_date': pd.Timestamp('2025-01-14 00:00:00'),
-        'round_num': 12
-    },
-    {
-        'adm0_iso3': 'MMR',
-        'adm0_name': 'Myanmar',
-        'coll_end_date': pd.Timestamp('2025-01-14 00:00:00'),
-        'round_num': 11
-    },{
-        'adm0_iso3': 'PAK',
-        'adm0_name': 'Pakistan',
-        'coll_end_date': pd.Timestamp('2025-01-14 00:00:00'),
-        'round_num': 6
-    },{
-        'adm0_iso3': 'AFG',
-        'adm0_name': 'Afghanistan',
-        'coll_end_date': pd.Timestamp('2025-01-14 00:00:00'),
-        'round_num': 10
-    }]
-
-    survey_list = [item for item in survey_list if item['adm0_iso3'] in selected_countries]
+if not get_updated_list_of_surveys_from_AGOL:
+    # Load cached survey list from JSON file
+    if os.path.exists(survey_list_cache_path):
+        with open(survey_list_cache_path, "r", encoding="utf-8") as f:
+            survey_list = json.load(f)
+    else:
+        raise FileNotFoundError("Cached survey list not found. Please set get_updated_list_of_surveys_from_AGOL = True once to fetch and store it.")
 
 else:
     # Feature layer URL (Layer 0)
     layer_url = "https://services5.arcgis.com/sjP4Ugu5s0dZWLjd/arcgis/rest/services/OER_Monitoring_System_View/FeatureServer/0"
     layer = FeatureLayer(layer_url)
     # Query all features
-    features = layer.query(where="round_validated='Yes'", out_fields="admin0_isocode, round, admin0_name_en, coll_end_date", return_geometry=False)
+    features = layer.query(where="round_validated='Yes'", out_fields="admin0_isocode, round, admin0_name_en, coll_end_date, card1_indicator2, card1_indicator2_text, methodology",   return_geometry=False)
+
     # Convert to DataFrame
     df = features.sdf
     # Drop duplicates to get unique combinations
@@ -89,11 +73,15 @@ else:
     latest_rounds = latest_rounds.sort_values("admin0_isocode").reset_index(drop=True)
 
     latest_rounds = latest_rounds[latest_rounds["admin0_isocode"].isin(selected_countries)].reset_index(drop=True)
-    latest_rounds = latest_rounds.rename(columns={"admin0_isocode": "adm0_iso3", "admin0_name_en": "adm0_name"})
+    latest_rounds = latest_rounds.rename(columns={"admin0_isocode": "adm0_iso3", "admin0_name_en": "adm0_name", "card1_indicator2": "diem_survey_coverage", "card1_indicator2_text": "diem_target_pop"})
     survey_list = latest_rounds.to_dict(orient="records")
     # Print the result
     # for survey in survey_list:
     #     print(survey["adm0_iso3"], survey["round_num"], survey.get("coll_end_date", "N/A"))
+    # Save survey list to cache file
+    with open(survey_list_cache_path, "w", encoding="utf-8") as f:
+        json.dump(survey_list, f, indent=2, default=str)
+
 
 # Show all columns and full width when printing DataFrames
 pd.set_option("display.max_columns", None)
@@ -101,11 +89,11 @@ pd.set_option("display.width", None)
 pd.set_option("display.max_colwidth", None)
 
 # === PARAMETERS ===
+
 group_indicators = {
-    "fies_resid": "hh_residencetype",
-    "fies_hhtype": "hh_agricactivity",
-    "agriculture": "hh_residencetype"
-}
+    "fies_resid": ["hh_residencetype", "Residence type" ],
+    "fies_hhtype": ["hh_agricactivity", "Agricultural activity" ],
+    "agriculture": ["hh_residencetype", "Residence type" ]}
 export_csv = True
 
 # === LOAD INDICATOR METADATA ===
@@ -129,26 +117,24 @@ def get_indicator_info(indicator_name):
 
 def fies_by_indicator(indicator_key, df, universe_label=None):
     fies_fields = {
-        "p_mod": "% moderate/severe (p_mod)",
-        "p_sev": "% severe only (p_sev)"
+        "p_mod": "moderate/severe (p_mod)",
+        "p_sev": "severe only (p_sev)"
     }
     fies_rows = []
-    indicator = group_indicators[indicator_key]
+
+    indicator, custom_label = group_indicators[indicator_key]  # NEW: extract both the field name and axis label
     info = get_indicator_info(indicator)
-    title = info["title"]
+    title = custom_label  # use the custom label as table index and x-axis label
     codes = info["codes"]
 
-
-    # Generate the descriptive title
+    # Generate the descriptive subtitle
     if universe_label is None:
         universe_label = "all households"
-    subtitle = f"FIES weighted average by {title} — Universe: {universe_label}"
-
-    # print(subtitle)
+    subtitle = f"FIES weighted average by {custom_label} — Universe: {universe_label}"
 
     for code, label in codes.items():
         if label in ["Don't know", "Refused"]:
-            continue  # Skip unwanted categories
+            continue
         try:
             group_df = df[df[indicator].astype("Int64") == int(code)]
         except ValueError:
@@ -156,7 +142,6 @@ def fies_by_indicator(indicator_key, df, universe_label=None):
 
         if len(group_df) == 0:
             continue
-        #print(f"Processing FIES for group '{label}' ({len(group_df)} records)...")
 
         row_data = {}
         for field, label_field in fies_fields.items():
@@ -172,12 +157,12 @@ def fies_by_indicator(indicator_key, df, universe_label=None):
                 except:
                     continue
             row_data[label_field] = round((weighted_sum / total_weight) * 100, 1) if total_weight > 0 else 0.0
-        row_data[title] = label
+        row_data[custom_label] = label
         fies_rows.append(row_data)
 
-    fies_df = pd.DataFrame(fies_rows).set_index(title)
+    fies_df = pd.DataFrame(fies_rows).set_index(custom_label)
 
-    # TOTAL row calculation
+    # TOTAL row
     total_row = {}
     for field, label_field in fies_fields.items():
         weighted_sum = 0.0
@@ -192,11 +177,15 @@ def fies_by_indicator(indicator_key, df, universe_label=None):
             except:
                 continue
         total_row[label_field] = round((weighted_sum / total_weight) * 100, 1) if total_weight > 0 else 0.0
-    fies_df.loc["TOTAL"] = pd.Series(total_row)
+    fies_df.loc["All"] = pd.Series(total_row)
+
+    # Custom title for table/chart (depends only on indicator_key)
     if indicator_key == 'fies_hhtype':
-        title = f"FIES: Prevalence of recent food insecurity (% of HH) by detailed agricultural dependency group (% of HH)"
+        title = "FIES: Prevalence of recent food insecurity by agricultural dependency (detailed)"
     elif indicator_key == 'fies_resid':
-        title = f"FIES: Prevalence of recent food insecurity (% of HH) by residency status (% of HH)"
+        title = "FIES: Prevalence of recent food insecurity by residency status"
+    else:
+        title = f"FIES: Prevalence of recent food insecurity by {custom_label}"
 
     return {
         "title": title,
@@ -214,8 +203,8 @@ def fies_by_simplified_agriculture(df):
     ) if pd.notna(x) else None)
 
     fies_fields = {
-        "p_mod": "% moderate/severe (p_mod)",
-        "p_sev": "% severe only (p_sev)"
+        "p_mod": "moderate/severe (p_mod)",
+        "p_sev": "severe only (p_sev)"
     }
     rows = []
     for group in df["agriculture_group"].dropna().unique():
@@ -257,9 +246,9 @@ def fies_by_simplified_agriculture(df):
             except:
                 continue
         total_row[label_field] = round((weighted_sum / total_weight) * 100, 1) if total_weight > 0 else 0.0
-    fies_df.loc["TOTAL"] = pd.Series(total_row)
+    fies_df.loc["All"] = pd.Series(total_row)
     return {
-        "title": "FIES: Prevalence of recent food insecurity by simplified agricultural dependency group (% of HH)",
+        "title": "FIES: Prevalence of recent food insecurity by agricultural dependency",
         "df": fies_df
     }
 
@@ -278,9 +267,9 @@ def agricultural_dependency(df):
     # Keep only valid analytical codes (exclude DK and REF)
     agriculture_keys = [1, 2, 3, 4]
 
-    agri_indicator = group_indicators["agriculture"]
+
+    agri_indicator, agri_title = group_indicators["agriculture"]
     agri_info = get_indicator_info(agri_indicator)
-    agri_title = agri_info["title"]
     agri_codes = agri_info["codes"]
     rows = []
 
@@ -334,10 +323,10 @@ def agricultural_dependency(df):
         agriculture_categories[k]: (total_counts[k] / total_weight * 100 if total_weight > 0 else 0.0)
         for k in agriculture_keys
     }
-    df_result.loc["TOTAL"] = pd.Series(total_row).round(1)
+    df_result.loc["All"] = pd.Series(total_row).round(1)
 
     return {
-        "title": "Detailed agricultural dependency by residency status (% of HH)",
+        "title": "Detailed agricultural dependency by residency status",
         "df": df_result
     }
 
@@ -349,9 +338,8 @@ def simplified_dependency_by_residency(df):
         "Non-agricultural HH" if int(x) == 4 else None
     ) if pd.notna(x) else None)
 
-    agri_indicator = group_indicators["fies_resid"]
+    agri_indicator, resid_title = group_indicators["fies_resid"]
     resid_info = get_indicator_info(agri_indicator)
-    resid_title = resid_info["title"]
     resid_codes = resid_info["codes"]
     rows = []
 
@@ -402,10 +390,10 @@ def simplified_dependency_by_residency(df):
         "Agricultural HH": (total_counts["Agricultural HH"] / total_weight * 100 if total_weight > 0 else 0.0),
         "Non-agricultural HH": (total_counts["Non-agricultural HH"] / total_weight * 100 if total_weight > 0 else 0.0)
     }
-    df_result.loc["TOTAL"] = pd.Series(total_row).round(1)
+    df_result.loc["All"] = pd.Series(total_row).round(1)
 
     return {
-        "title": "Simplified agricultural dependency by residency status (% of HH)",
+        "title": "Simplified agricultural dependency by residency status",
         "df": df_result
     }
 
@@ -836,7 +824,7 @@ def residency_sample_size_summary(df):
         count = df[df["hh_residencetype"] == code].shape[0]
         rows.append({
             "Residency group": label,
-            "Sample size": count
+            "Observations": count
         })
         total += count
 
@@ -846,13 +834,11 @@ def residency_sample_size_summary(df):
     #     print(f"{row['Residency group']}: {row['Sample size']}")
 
     return {
-        "title": "Sample size by residency status. The next three tables and charts will be based on the residency status of the household. In some cases, specific groups may be underrepresented; therefore, the analysis outcomes should be interpreted with caution.",
+        "title": "Observations by residency status. The next three tables and charts will be based on the residency status of the household. In some cases, specific groups may be underrepresented; therefore, the analysis outcomes should be interpreted with caution.",
         "metadata": f"Total sample size: {total}",
         "df": pd.DataFrame(rows)
     }
 
-import pandas as pd
-import requests
 
 def get_top7_shocks_by_country(adm0_iso3: str) -> pd.DataFrame:
     indicators = [
@@ -914,6 +900,8 @@ for survey in survey_list:
     adm0_iso3 = survey["adm0_iso3"]
     adm0_name = survey["adm0_name"]
     round_num = survey["round_num"]
+    diem_survey_coverage = survey["diem_survey_coverage"]
+    diem_target_pop = survey["diem_target_pop"]
     coll_end_date = survey["coll_end_date"]
     print("Processing %s R%s" % (adm0_iso3, round_num))
 # for survey in survey_list:
@@ -1017,12 +1005,41 @@ for survey in survey_list:
         wb = Workbook()
         ws = wb.active
         ws.title = "DIEM Surveys analysis"
+        current_row = 1
+
+        # === Add coverage map at the top ===
+        coverage_map_dir = os.path.join("outputs_for_erps", "coverage_maps")
+        search_pattern = f"map_{adm0_iso3.lower()}_round{round_num}_*.png"
+        matching_files = glob.glob(os.path.join(coverage_map_dir, search_pattern))
+        if matching_files:
+            img_path = matching_files[0]
+            img = ExcelImage(img_path)
+
+            # Open image using PIL to get original dimensions
+            with PILImage.open(img_path) as pil_img:
+                orig_w, orig_h = pil_img.size
+
+            # Set a maximum width to avoid oversized images
+            max_width = 900
+            if orig_w > max_width:
+                scale_factor = max_width / orig_w
+                img.width = int(orig_w * scale_factor)
+                img.height = int(orig_h * scale_factor)
+            else:
+                img.width = orig_w
+                img.height = orig_h
+
+            ws.add_image(img, "A1")
+
+            # Roughly estimate rows occupied (Excel row ≈ 20 px high)
+            current_row += int(img.height / 20) + 5
+        else:
+            print(f"No coverage map found for {adm0_iso3} R{round_num}")
 
         # Set wider column widths for A–E
         for col in ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J","K","L","M",'N']:
             ws.column_dimensions[col].width = 24
 
-        current_row = 1
         label_max_len = 30   # Truncate chart labels beyond this length
 
         thin_border = Border(
@@ -1127,8 +1144,8 @@ for survey in survey_list:
             # skip chart and optionally skip full table rendering
             contains_chart = True
             if (
-                    df.shape[1] == 3 and df.columns.tolist() == ['index', 'Residency group', 'Sample size']
-                    and "sample size by residency status" in result["title"].lower()
+                    df.shape[1] == 3 and df.columns.tolist() == ['index', 'Residency group', 'Observations']
+                    and "observations by residency status" in result["title"].lower()
             ):
                 # Write the table as normal
                 table_cols = list(df.columns)
@@ -1150,6 +1167,10 @@ for survey in survey_list:
                 current_row += 2
                 contains_chart = False
                 continue
+
+            # Remove 'None' category from assistance received charts
+            if "assistance received" in result["title"].lower():
+                df = df[~df.iloc[:, 0].str.strip().str.lower().eq("none")]
 
             # Create truncated label column for chart X-axis
             chart_labels_col = df.columns[0] + "_short"
@@ -1238,9 +1259,10 @@ for survey in survey_list:
                 else:
                     chart = BarChart()
                     chart.type = "col"
-                    chart.title = "Chart: " + result["title"]
-                    chart.y_axis.title = "Percentage"
-                    chart.x_axis.title = df.columns[0]
+                    chart.title = result["title"]
+                    chart.y_axis.title = "Percentage of households"
+                    #chart.x_axis.title = df.columns[0]
+
                     chart.width = 18
                     chart.height = 9
 
@@ -1261,12 +1283,36 @@ for survey in survey_list:
                     else:
                         current_row = chart_row - 10
 
+        # Add sheet with methodology text for the current survey
+        ws_method = wb.create_sheet(title="DIEM Survey methodology")
+
+        # Optional: bold title
+        ws_method["A1"] = f"Methodology for {adm0_name} – Round {round_num}"
+        ws_method["A1"].font = Font(size=12, bold=True)
+
+        # Write the actual methodology content starting from row 3
+        methodology_text_raw = survey.get("methodology", "No methodology information available.")
+        # Remove HTML tags like <br>, <b>, <u>, etc.
+        methodology_cleaned = re.sub(r"<[^>]+>", "", methodology_text_raw).strip()
+
+        # Wrap the text every 120 characters at word boundaries
+        def wrap_text(text, max_len=120):
+            import textwrap
+            return textwrap.fill(text, width=max_len, break_long_words=False)
+
+        wrapped_text = wrap_text(methodology_cleaned)
+
+        # Write each line to the Excel sheet
+        for i, line in enumerate(wrapped_text.split('\n'), start=3):
+            ws_method.cell(row=i, column=1, value=line)
+
         # Create the output directory if it does not exist
         output_dir = "outputs_for_erps"
         os.makedirs(output_dir, exist_ok=True)
 
         # Define path inside the subdirectory
         output_path = os.path.join(output_dir, f"DIEM_survey_analysis_ERPs_202507_{adm0_iso3}_{round_num}.xlsx")
+
         wb.save(output_path)
         print(f"\nExported grouped analysis with adaptive chart layout to: {output_path}")
 

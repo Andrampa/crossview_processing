@@ -128,7 +128,9 @@ for survey_detail in survey_details:
                 axes = [axes]
 
             # Add overall title on top
-            fig.suptitle(f"{adm0_name}: DIEM – IPC coverages", fontsize=18, fontweight='bold', ha='center', y=0.98)
+            #fig.suptitle(f"{adm0_name}: DIEM – IPC coverages", fontsize=18, fontweight='bold', ha='center', y=0.98)
+            fig.suptitle(f"{adm0_name} – DIEM survey and IPC/CH phase overlap", fontsize=17, fontweight='bold',
+                         ha='center', y=0.98)
 
             ax_idx = 0
 
@@ -151,19 +153,32 @@ for survey_detail in survey_details:
                 ax.set_title(title, fontsize=13)
                 ax.set_axis_off()
 
+
             if has_current:
-                current_title = f"Current situation ({ipc_gdf['current_from_date'].dropna().iloc[0] if 'current_from_date' in ipc_gdf else '?'} to {ipc_gdf['current_thru_date'].dropna().iloc[0] if 'current_thru_date' in ipc_gdf else '?'})"
-                plot_phase(axes[ax_idx], "overall_phase_C", f"DIEM R{round} ({coll_end_date})\n{current_title}")
+                start = ipc_gdf['current_from_date'].dropna().iloc[0] if 'current_from_date' in ipc_gdf else '?'
+                end = ipc_gdf['current_thru_date'].dropna().iloc[0] if 'current_thru_date' in ipc_gdf else '?'
+                period = f"{pd.to_datetime(start).strftime('%b %Y')} to {pd.to_datetime(end).strftime('%b %Y')}" if start != '?' and end != '?' else '?'
+                subtitle = f"DIEM coverage in Round {round} ({coll_end_date}) \nand IPC acute food insecurity phases – Current situation ({period})"
+                plot_phase(axes[ax_idx], "overall_phase_C", subtitle)
                 ax_idx += 1
 
             if has_projection:
-                proj_title = f"First projection ({ipc_gdf['projected_from_date'].dropna().iloc[0] if 'projected_from_date' in ipc_gdf else '?'} to {ipc_gdf['projected_thru_date'].dropna().iloc[0] if 'projected_thru_date' in ipc_gdf else '?'})"
-                plot_phase(axes[ax_idx], "overall_phase_P", f"DIEM R{round} ({coll_end_date})\n{proj_title}")
+                start = ipc_gdf['projected_from_date'].dropna().iloc[0] if 'projected_from_date' in ipc_gdf else '?'
+                end = ipc_gdf['projected_thru_date'].dropna().iloc[0] if 'projected_thru_date' in ipc_gdf else '?'
+                period = f"{pd.to_datetime(start).strftime('%b %Y')} to {pd.to_datetime(end).strftime('%b %Y')}" if start != '?' and end != '?' else '?'
+                subtitle = f"DIEM coverage in Round {round} ({coll_end_date}) \nand IPC acute food insecurity phases – First projection ({period})"
+                plot_phase(axes[ax_idx], "overall_phase_P", subtitle)
                 ax_idx += 1
 
             if has_second_projection:
-                second_title = f"Second projection ({ipc_gdf['second_projected_from_date'].dropna().iloc[0] if 'second_projected_from_date' in ipc_gdf else '?'} to {ipc_gdf['second_projected_thru_date'].dropna().iloc[0] if 'second_projected_thru_date' in ipc_gdf else '?'})"
-                plot_phase(axes[ax_idx], "overall_phase_A", f"DIEM R{round} ({coll_end_date})\n{second_title}")
+                start = ipc_gdf['second_projected_from_date'].dropna().iloc[
+                    0] if 'second_projected_from_date' in ipc_gdf else '?'
+                end = ipc_gdf['second_projected_thru_date'].dropna().iloc[
+                    0] if 'second_projected_thru_date' in ipc_gdf else '?'
+                period = f"{pd.to_datetime(start).strftime('%b %Y')} to {pd.to_datetime(end).strftime('%b %Y')}" if start != '?' and end != '?' else '?'
+                subtitle = f"DIEM coverage in Round {round} ({coll_end_date}) \nand IPC acute food insecurity phases – Second projection ({period})"
+                plot_phase(axes[ax_idx], "overall_phase_A", subtitle)
+
 
             annotation_lines = [f"DIEM Survey R{round} coverage: {diem_survey_coverage}"]
             annotation_lines.append(f"DIEM Survey R{round} target population: {diem_target_pop}")
@@ -184,7 +199,7 @@ for survey_detail in survey_details:
 
             annotation_lines.append("")
             annotation_lines.append("Note: figures are indicative, as DIEM and IPC/CH may use different administrative references or levels.")
-            annotation_lines.append("All values are automatically derived. For authoritative information, please refer to official DIEM and IPC/CH documentation.")
+            annotation_lines.append("Maps and figures above automatically derived. For authoritative information, please refer to official DIEM and IPC/CH documentation.")
 
             annotation_text = "\n".join(annotation_lines)
 
@@ -300,7 +315,9 @@ for survey_detail in survey_details:
             if ncols == 1:
                 axes = [axes]
             # Add overall title on top
-            fig.suptitle(f"{adm0_name}: DIEM – IPC/CH coverages", fontsize=18, fontweight='bold', ha='center', y=0.98)
+            #fig.suptitle(f"{adm0_name}: DIEM – IPC/CH coverages", fontsize=18, fontweight='bold', ha='center', y=0.98)
+            fig.suptitle(f"{adm0_name} – DIEM survey and IPC/CH phase overlap", fontsize=17, fontweight='bold',
+                         ha='center', y=0.98)
 
             join_field = "adm2_pcode"
             if adm0_iso3 in countries_ipc_adm1:
@@ -331,8 +348,10 @@ for survey_detail in survey_details:
                     "area_phase_proj2": "Second projection"
                 }
                 period_text = df_phase["reference_period"].dropna().iloc[0]
-                ax.set_title(f"DIEM Monitoring Survey Round {round} ({coll_end_date}) and IPC acute food insecurity\n{label_map[col]} ({period_text})", fontsize=13)
+                subtitle = f"DIEM coverage in Round {round} ({coll_end_date}) \nand CH/IPC acute food insecurity phases – {label_map[col]} ({period_text})"
+                ax.set_title(subtitle, fontsize=13)
                 ax.set_axis_off()
+
 
             # === Annotation block ===
             annotation_lines = [f"DIEM Survey R{round} coverage: {diem_survey_coverage}"]
