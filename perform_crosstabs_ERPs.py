@@ -43,6 +43,7 @@ selected_countries = [
 #    'BGD']
 
 get_updated_list_of_surveys_from_AGOL = False
+dev_mode = False
 
 if not get_updated_list_of_surveys_from_AGOL:
     # Load cached survey list from JSON file
@@ -840,58 +841,13 @@ def residency_sample_size_summary(df):
     }
 
 
-def get_top7_shocks_by_country(adm0_iso3: str) -> pd.DataFrame:
-    indicators = [
-        "shock_noshock", "shock_sicknessordeathofhh", "shock_lostemplorwork", "shock_otherintrahhshock",
-        "shock_higherfoodprices", "shock_higherfuelprices", "shock_mvtrestrict", "shock_othereconomicshock",
-        "shock_pestoutbreak", "shock_plantdisease", "shock_animaldisease", "shock_napasture",
-        "shock_othercropandlivests", "shock_coldtemporhail", "shock_flood", "shock_hurricane",
-        "shock_drought", "shock_earthquake", "shock_landslides", "shock_firenatural",
-        "shock_othernathazard", "shock_violenceinsecconf", "shock_theftofprodassets",
-        "shock_firemanmade", "shock_othermanmadehazard", "shock_dk", "shock_ref",
-        "fies_mod_sev", "fies_sev"
-    ]
-
-    service_url = "https://services5.arcgis.com/sjP4Ugu5s0dZWLjd/ArcGIS/rest/services/diem_trend_adm0/FeatureServer/66/query"
-
-    where_clause = f"(adm0_iso3 = '{adm0_iso3}') AND indicator IN ('" + "','".join(indicators) + "')"
-    params = {
-        "where": where_clause,
-        "outFields": "adm0_iso3,indicator,value,round,coll_end_date",
-        "returnGeometry": "false",
-        "outSR": "4326",
-        "f": "json",
-        "resultRecordCount": "5000"
-    }
-
-    response = requests.get(service_url, params=params)
-    response.raise_for_status()
-    data = response.json()
-    records = [f["attributes"] for f in data.get("features", [])]
-
-    df = pd.DataFrame(records)
-    df["coll_end_date"] = pd.to_datetime(df["coll_end_date"], unit="ms", errors="coerce")
-
-    shock_df = df[~df["indicator"].isin(["fies_mod_sev", "fies_sev"])]
-    top_shocks = (
-        shock_df.groupby("indicator")
-        .apply(lambda g: g.loc[g["value"].idxmax()])
-        .sort_values("value", ascending=False)
-        .head(7)
-        .indicator
-        .tolist()
-    )
-
-    top_indicators = top_shocks + ["fies_mod_sev", "fies_sev"]
-    result_df = df[df["indicator"].isin(top_indicators)].copy()
-    result_df.sort_values(["indicator", "coll_end_date"], inplace=True)
-    return result_df
-
 
 # === LOAD CSV ===
 
-# csv_path = r"C:\git\crossview_processing\DIEM_micro20250703_CODR89.csv"
-csv_path = r"C:\git\crossview_processing\DIEM_micro20250703.csv"
+if dev_mode:
+    csv_path = r"C:\git\crossview_processing\DIEM_micro20250722_CODR9.csv"
+else:
+    csv_path = r"C:\git\crossview_processing\DIEM_micro20250722.csv"
 
 df_all = pd.read_csv(csv_path)
 failed_icp_floods = []
@@ -976,24 +932,6 @@ for survey in survey_list:
         failed_icp_floods.append(adm0_iso3)
 
 
-    # === Add top shocks + FIES trends (time series)
-    try:
-        print("Top 7 shock trends and food insecurity (FIES)")
-        top_shocks_df = get_top7_shocks_by_country(adm0_iso3)
-        result_dfs.append({
-            "title": "Top 7 shocks and food insecurity trends (national level)",
-            "metadata": None,
-            "df": top_shocks_df
-        })
-    except Exception as e:
-        print(f"❌ Failed to extract shock trends: {e}")
-
-    # Print results
-    # for res in result_dfs:
-    #     # print(f"\n=== {res['title']} ===")
-    #     if "metadata" in res:
-    #         print(res["metadata"])
-    #     print(res["df"])
 
     if export_csv:
         from openpyxl import Workbook
@@ -1081,64 +1019,6 @@ for survey in survey_list:
 
             df = result["df"].reset_index()
 
-            # === Special case: shock + FIES trends (time series) line chart
-            if result["title"].lower().startswith("top 7 shocks and food insecurity"):
-                # Create a pivot: rows = date, columns = indicator, values = value
-                df_pivot = df.pivot_table(index="coll_end_date", columns="indicator", values="value",
-                                          aggfunc="mean").reset_index()
-                df_pivot = df_pivot.sort_values("coll_end_date")
-
-                # Remove 'fies_sev' from both table and chart
-                if "fies_sev" in df_pivot.columns:
-                    df_pivot = df_pivot.drop(columns=["fies_sev"])
-
-                # Skip writing the table to the Excel sheet (only chart)
-
-                # Define reference range for line chart
-                min_col = 2  # first indicator (after date)
-                max_col = 1 + len(df_pivot.columns) - 1
-                num_data_rows = df_pivot.shape[0]
-                date_col = 1
-
-                # Write the pivot to sheet temporarily, only for chart data (in a hidden area if needed)
-                temp_row_start = current_row
-                for row in dataframe_to_rows(df_pivot, index=False, header=True):
-                    for col_idx, val in enumerate(row, 1):
-                        ws.cell(row=current_row, column=col_idx, value=val)
-                    current_row += 1
-
-                from openpyxl.chart import LineChart
-
-                data = Reference(ws, min_col=min_col, min_row=temp_row_start,
-                                 max_col=max_col, max_row=current_row - 1)
-
-                categories = Reference(ws, min_col=date_col, min_row=temp_row_start + 2,
-                                       max_row=current_row - 1)
-
-                line_chart = LineChart()
-                line_chart.title = "Most frequent 7 Shock and food insecurity trends (p_mod)"
-                line_chart.y_axis.title = "Value"
-                line_chart.x_axis.title = "Collection date"
-                line_chart.x_axis.number_format = "mmm yyyy"
-                line_chart.width = 24  # larger width
-                line_chart.height = 14  # larger height
-                line_chart.add_data(data, titles_from_data=True)
-                line_chart.set_categories(categories)
-                line_chart.legend.position = "b"
-
-
-                # Match series by their column order (excluding 'coll_end_date')
-                for idx, series in enumerate(line_chart.series):
-                    series.smooth = True
-                    col_name = df_pivot.columns[idx + 1]  # +1 to skip 'coll_end_date'
-                    if col_name == "fies_mod_sev":
-                        series.graphicalProperties.line.dashStyle = "sysDot"
-
-                chart_row = current_row + 2
-                chart_position = f"B{chart_row}"
-                ws.add_chart(line_chart, chart_position)
-                current_row = chart_row + 20
-                continue  # skip default logic for this result
 
             # === Handle special cases:
             # skip chart and optionally skip full table rendering
@@ -1255,6 +1135,7 @@ for survey in survey_list:
 
 
 
+
                 # === Default chart for all other tables
                 else:
                     chart = BarChart()
@@ -1262,7 +1143,6 @@ for survey in survey_list:
                     chart.title = result["title"]
                     chart.y_axis.title = "Percentage of households"
                     #chart.x_axis.title = df.columns[0]
-
                     chart.width = 18
                     chart.height = 9
 
@@ -1272,7 +1152,29 @@ for survey in survey_list:
                                            min_row=start_row + 1, max_row=start_row + num_rows)
 
                     chart.add_data(data, titles_from_data=True)
+                    # === Apply custom colors for satisfaction chart ===
+                    if "satisfaction" in result["title"].lower():
+                        custom_colors = [
+                            "00B050",  # Green – Yes - satisfied
+                            "C00000",  # Dark red
+                            "F79646",  # Orange
+                            "8B4513",  # Brown
+                            "800080",  # Purple
+                            "9370DB"  # Light purple
+                        ]
+
+                        for i, series in enumerate(chart.series):
+                            color = custom_colors[i] if i < len(custom_colors) else custom_colors[
+                                i % len(custom_colors)]
+                            series.graphicalProperties.solidFill = color
+
                     chart.set_categories(categories)
+
+                    if result["title"] in ["Simplified agricultural dependency by residency status", "Detailed agricultural dependency by residency status"]\
+                            or 'Satisfaction'.lower() in result["title"]:
+                        chart.grouping = "stacked"
+                        chart.overlap = 100
+                        chart.y_axis.scaling.max = 100
 
                     chart_row = current_row + 2
                     chart_position = f"B{chart_row}"
