@@ -42,7 +42,7 @@ selected_countries = [
 # selected_countries = [
 #    'BGD']
 
-get_updated_list_of_surveys_from_AGOL = False
+get_updated_list_of_surveys_from_AGOL = True
 dev_mode = False
 
 if not get_updated_list_of_surveys_from_AGOL:
@@ -844,11 +844,25 @@ def residency_sample_size_summary(df):
 
 # === LOAD CSV ===
 
-if dev_mode:
-    csv_path = r"C:\git\crossview_processing\DIEM_micro20250722_CODR9.csv"
-else:
-    csv_path = r"C:\git\crossview_processing\DIEM_micro20250722.csv"
 
+
+if dev_mode:
+    csv_path = r"C:\git\crossview_processing\DIEM_micro20250723.csv"
+else:
+    csv_path = r"C:\git\crossview_processing\DIEM_micro20250723.csv"
+
+columns_to_use = [
+    "adm0_iso3", "adm0_name", "round", "weight_final", "p_mod", "p_sev",
+    "hh_residencetype", "hh_agricactivity", "assistance_quality", "need"
+]
+# Load only relevant fields from microdata, to improve performance
+# Dynamically collect all columns starting with 'need_' and 'need_received_'
+sample_cols = pd.read_csv(csv_path, nrows=0).columns.tolist()
+columns_to_use += [col for col in sample_cols if col.startswith("need_") or col.startswith("need_received_")]
+
+#df_all = pd.read_csv(csv_path, usecols=columns_to_use)
+
+#to load all csv instead (currently it takes 4 seconds more)
 df_all = pd.read_csv(csv_path)
 failed_icp_floods = []
 # === Main loop ===
@@ -1115,7 +1129,7 @@ for survey in survey_list:
                     chart_crop = BarChart()
                     chart_crop.type = "col"
                     chart_crop.grouping = "clustered"
-                    chart_crop.title = "Flood exposure: cropland only (top 10 adm2 in IPC3+)"
+                    chart_crop.title = "Cropland exposed to floods (top 10 adm2 in IPC3+)"
                     chart_crop.x_axis.title = "Admin2 unit"
                     chart_crop.y_axis.title = "Cropland exposed (Km²)"
                     chart_crop.y_axis.majorGridlines = None

@@ -58,7 +58,7 @@ survey_details = [['AFG',  10,  'All 34 Province are covered',  'Afghanistan',  
  ['IRQ',  13,  'All 18 Governorate are covered',  'Iraq',  'Target: Entire population'], ['LBN',  8,  '25 Districts covered out of 26',  'Lebanon',  'Target: Agricultural population'],
  ['MLI', 9, '8 Region covered out of 10', 'Mali', 'Target: Rural population'], ['MMR',  11,  '13 State/Region covered out of 15',  'Myanmar',  'Target: Entire population'],
  ['MOZ',  7,  '9 Provinces covered out of 11',  'Mozambique',  'Target: Rural population'], ['MWI',  1,  '28 Districts covered out of 32',  'Malawi',  'Target: Agricultural population'],
-['NER',  10,  '7 Regions covered out of 8',  'Niger',  'Target: Rural population'], ['NGA',  7,  '5 provinces covered out of 37',  'Nigeria',  'Target: Entire population'],
+['NER',  10,  '7 Regions covered out of 8',  'Niger',  'Target: Rural population'], ['NGA',  8,  '3 States covered out of 37',  'Nigeria',  'Target: Rural population'],
  ['PAK',  6,  '25 District covered out of 161',  'Pakistan',  'Target: Rural population'], ['PSE',  1,  '9 Governorates covered out of 14',  'Palestine',  'Target: Agricultural population'],
  ['TCD',  8,  '19 Departement covered out of 70',  'Chad',  'Target: Rural population'], ['YEM',  28,  'All 22 Governorates are covered',  'Yemen',  'Target: Entire population'],
  ['ZWE',  10,  '8 Province covered out of 10',  'Zimbabwe',  'Target: Rural population']]
