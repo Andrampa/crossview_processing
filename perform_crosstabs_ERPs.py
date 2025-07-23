@@ -860,10 +860,10 @@ columns_to_use = [
 sample_cols = pd.read_csv(csv_path, nrows=0).columns.tolist()
 columns_to_use += [col for col in sample_cols if col.startswith("need_") or col.startswith("need_received_")]
 
-#df_all = pd.read_csv(csv_path, usecols=columns_to_use)
+df_all = pd.read_csv(csv_path, usecols=columns_to_use)
 
 #to load all csv instead (currently it takes 4 seconds more)
-df_all = pd.read_csv(csv_path)
+#df_all = pd.read_csv(csv_path)
 failed_icp_floods = []
 # === Main loop ===
 for survey in survey_list:
