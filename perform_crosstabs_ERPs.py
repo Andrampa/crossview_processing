@@ -40,12 +40,13 @@ selected_countries = [
 ]
 
 # selected_countries = [
-#    'BGD']
+#    'COD']
 
 get_updated_list_of_surveys_from_AGOL = True
 dev_mode = False
 
 if not get_updated_list_of_surveys_from_AGOL:
+    print("Getting updated_list_of_surveys_from cache")
     # Load cached survey list from JSON file
     if os.path.exists(survey_list_cache_path):
         with open(survey_list_cache_path, "r", encoding="utf-8") as f:
@@ -54,6 +55,7 @@ if not get_updated_list_of_surveys_from_AGOL:
         raise FileNotFoundError("Cached survey list not found. Please set get_updated_list_of_surveys_from_AGOL = True once to fetch and store it.")
 
 else:
+    print("Getting updated_list_of_surveys_from_agol")
     # Feature layer URL (Layer 0)
     layer_url = "https://services5.arcgis.com/sjP4Ugu5s0dZWLjd/arcgis/rest/services/OER_Monitoring_System_View/FeatureServer/0"
     layer = FeatureLayer(layer_url)
@@ -95,6 +97,26 @@ group_indicators = {
     "fies_resid": ["hh_residencetype", "Residence type" ],
     "fies_hhtype": ["hh_agricactivity", "Agricultural activity" ],
     "agriculture": ["hh_residencetype", "Residence type" ]}
+shock_label_map = {
+    "shock_coldtemporhail": "Cold temperature or hail",
+    "shock_sicknessordeathofhh": "Sickness or death in household",
+    "shock_napasture": "No access to pasture",
+    "shock_higherfoodprices": "Higher food prices",
+    "shock_lostemplorwork": "Loss of employment or income",
+    "shock_landslides": "Landslides",
+    "shock_animaldisease": "Animal disease",
+    "shock_drought": "Drought",
+    "shock_plantdisease": "Plant disease",
+    "shock_flood": "Flood",
+    "shock_higherfuelprices": "Higher fuel prices",
+    "shock_earthquake": "Earthquake",
+    "shock_firemanmade": "Manmade fire",
+    "shock_mvtrestrict": "Movement restrictions",
+    "shock_pestoutbreak": "Pest outbreak",
+    "shock_theftofprodassets": "Theft of productive assets",
+    "shock_firenatural": "Natural fire"
+}
+
 export_csv = True
 
 # === LOAD INDICATOR METADATA ===
@@ -840,6 +862,72 @@ def residency_sample_size_summary(df):
         "df": pd.DataFrame(rows)
     }
 
+def query_shocks_trend_adm0_with_averages_and_deviation(adm0_iso3):
+    from arcgis.features import FeatureLayer
+    import pandas as pd
+
+    layer_url = "https://services5.arcgis.com/sjP4Ugu5s0dZWLjd/arcgis/rest/services/diem_trend_adm0/FeatureServer/66"
+    layer = FeatureLayer(layer_url)
+    where_clause = f"adm0_iso3 = '{adm0_iso3}' AND indicator LIKE 'shock_%'"
+    features = layer.query(where=where_clause, out_fields="*", return_geometry=False)
+    df = features.sdf if features and features.features else pd.DataFrame()
+
+    if df.empty:
+        print(f"No data found for {adm0_iso3}")
+        return df, pd.DataFrame(), pd.DataFrame()
+
+    # Clean and filter
+    df = df.copy()
+    df["round"] = pd.to_numeric(df["round"], errors="coerce")
+    df["value"] = pd.to_numeric(df["value"], errors="coerce")
+    df = df.dropna(subset=["round", "value", "indicator"])
+    df = df[df["indicator"] != "shock_anyshock"]
+
+    # Identify indicators that exist in the latest round only
+    latest_round_global = df["round"].max()
+    indicators_in_latest_round = df[df["round"] == latest_round_global]["indicator"].unique()
+
+    # Averages over last 6 rounds (full df, filtered after)
+    last6_df = (
+        df.sort_values("round", ascending=False)
+          .groupby("indicator")
+          .head(6)
+    )
+    averages = (
+        last6_df.groupby("indicator")["value"]
+        .mean().round(2)
+        .reset_index()
+        .rename(columns={"value": "avg_last6rounds"})
+    )
+
+    # Latest value per indicator
+    latest_df = (
+        df.sort_values("round", ascending=False)
+          .groupby("indicator")
+          .first()
+          .reset_index()[["indicator", "value", "round"]]
+          .rename(columns={"value": "latest_value", "round": "latest_round"})
+    )
+
+    # Merge and compute metrics
+    merged = averages.merge(latest_df, on="indicator", how="inner")
+    merged["deviation"] = (merged["latest_value"] - merged["avg_last6rounds"]).round(2)
+    merged["percent_change"] = (
+        ((merged["latest_value"] - merged["avg_last6rounds"]) / merged["avg_last6rounds"]) * 100
+    ).round(1)
+
+    # Filter all outputs to indicators available in the latest round
+    averages = averages[averages["indicator"].isin(indicators_in_latest_round)]
+    latest_df = latest_df[latest_df["indicator"].isin(indicators_in_latest_round)]
+    merged = merged[merged["indicator"].isin(indicators_in_latest_round)]
+
+    # Sort
+    averages_sorted = averages.sort_values("avg_last6rounds", ascending=False).reset_index(drop=True)
+    deviations_sorted = merged.sort_values("deviation", ascending=False).reset_index(drop=True)
+
+    return df, averages_sorted, deviations_sorted
+
+
 
 
 # === LOAD CSV ===
@@ -847,7 +935,7 @@ def residency_sample_size_summary(df):
 
 
 if dev_mode:
-    csv_path = r"C:\git\crossview_processing\DIEM_micro20250723.csv"
+    csv_path = r"C:\git\crossview_processing\DIEM_micro20250703_CODR9.csv"
 else:
     csv_path = r"C:\git\crossview_processing\DIEM_micro20250723.csv"
 
@@ -859,9 +947,9 @@ columns_to_use = [
 # Dynamically collect all columns starting with 'need_' and 'need_received_'
 sample_cols = pd.read_csv(csv_path, nrows=0).columns.tolist()
 columns_to_use += [col for col in sample_cols if col.startswith("need_") or col.startswith("need_received_")]
-
+print("Loading CSV")
 df_all = pd.read_csv(csv_path, usecols=columns_to_use)
-
+print("CSV Loaded")
 #to load all csv instead (currently it takes 4 seconds more)
 #df_all = pd.read_csv(csv_path)
 failed_icp_floods = []
@@ -945,7 +1033,61 @@ for survey in survey_list:
         print ('FAILED IPC TABLE INSERTION')
         failed_icp_floods.append(adm0_iso3)
 
+    print('Shocks trends and deviations')
+    df_trend, df_avg6, df_dev = query_shocks_trend_adm0_with_averages_and_deviation(adm0_iso3)
 
+    if not df_avg6.empty:
+        df_fixed = df_avg6.rename(columns={"indicator": "Shock", "avg_last6rounds": "Weighted % of HH"}).sort_values(
+            "Weighted % of HH", ascending=False)
+        df_fixed["Weighted % of HH"] = df_fixed["Weighted % of HH"].astype(float)
+
+        # Rename shocks
+        df_fixed["Shock"] = df_fixed["Shock"].replace(shock_label_map)
+
+        # Rounds metadata logic
+        round_min = df_trend['round'].min()
+        round_max = df_trend['round'].max()
+        round_diff = round_max - round_min + 1  # inclusive
+        if round_diff > 6:
+            title_rounds = 6
+            metadata_start = round_max - 5
+        else:
+            title_rounds = round_diff
+            metadata_start = round_min
+
+        result_dfs.append({
+            "title": f"Most frequent shocks – average over last {title_rounds} rounds",
+            "metadata": f"{adm0_name} – DIEM data, rounds {metadata_start} to {round_max}",
+            "df": df_fixed
+        })
+
+    if not df_dev.empty:
+        df_dev["deviation"] = df_dev["deviation"].astype(float)
+        df_dev["percent_change"] = df_dev["percent_change"].astype(float)
+
+        df_deviation = df_dev[["indicator", "deviation"]].rename(
+            columns={"indicator": "Shock", "deviation": "Deviation (pp)"}
+        ).sort_values("Deviation (pp)", ascending=False)
+
+        df_percent = df_dev[["indicator", "percent_change"]].rename(
+            columns={"indicator": "Shock", "percent_change": "Percent change (%)"}
+        ).sort_values("Percent change (%)", ascending=False)
+
+        # Apply renaming here too
+        for df_out in [df_deviation, df_percent]:
+            df_out["Shock"] = df_out["Shock"].replace(shock_label_map)
+
+        result_dfs.append({
+            "title": "Shocks: deviation from average",
+            "metadata": f"{adm0_name} – DIEM data, last round: {df_dev['latest_round'].max()}",
+            "df": df_deviation
+        })
+
+        result_dfs.append({
+            "title": "Shocks: percent change from average",
+            "metadata": f"{adm0_name} – DIEM data, last round: {df_dev['latest_round'].max()}",
+            "df": df_percent
+        })
 
     if export_csv:
         from openpyxl import Workbook
@@ -1031,15 +1173,16 @@ for survey in survey_list:
                 ws.cell(row=current_row, column=1, value=result["metadata"])
                 current_row += 1
 
-            df = result["df"].reset_index()
-
+            #df = result["df"].reset_index()
+            df = result["df"]
+            if df.index.name is not None or isinstance(df.index, pd.MultiIndex):
+                df = df.reset_index()
 
             # === Handle special cases:
             # skip chart and optionally skip full table rendering
             contains_chart = True
             if (
-                    df.shape[1] == 3 and df.columns.tolist() == ['index', 'Residency group', 'Observations']
-                    and "observations by residency status" in result["title"].lower()
+                    df.shape[1] == 2 and df.columns.tolist() == ['Residency group', 'Observations']
             ):
                 # Write the table as normal
                 table_cols = list(df.columns)
@@ -1074,11 +1217,29 @@ for survey in survey_list:
 
             # Write table (full-length labels)
             table_cols = list(df.columns[:-1])  # exclude chart_labels_col
-            for row_idx, row in enumerate(dataframe_to_rows(df[table_cols], index=False, header=True)):
-                for col_idx, val in enumerate(row, 1):
-                    cell = ws.cell(row=current_row, column=col_idx, value=val)
-                    cell.border = thin_border
+            print(df[table_cols])
+
+            if "shocks" in result['title'].lower():
+                # Write header
+                for col_idx, col_name in enumerate(table_cols, 1):
+                    ws.cell(row=current_row, column=col_idx, value=col_name).border = thin_border
                 current_row += 1
+
+                # Determine the actual column names
+                first_col, second_col = table_cols
+
+                # Write data rows manually
+                for _, row in df[table_cols].iterrows():
+                    ws.cell(row=current_row, column=1, value=str(row[first_col])).border = thin_border
+                    ws.cell(row=current_row, column=2, value=row[second_col]).border = thin_border
+                    current_row += 1
+
+            else: #using default dataframe_to_rows for all other cases
+                for row_idx, row in enumerate(dataframe_to_rows(df[table_cols], index=False, header=True)):
+                    for col_idx, val in enumerate(row, 1):
+                        cell = ws.cell(row=current_row, column=col_idx, value=val)
+                        cell.border = thin_border
+                    current_row += 1
 
             # Write truncated labels far right in column AZ (col 52)
             chart_label_col_idx = 52
@@ -1156,9 +1317,13 @@ for survey in survey_list:
                     chart.type = "col"
                     chart.title = result["title"]
                     chart.y_axis.title = "Percentage of households"
-                    #chart.x_axis.title = df.columns[0]
-                    chart.width = 18
-                    chart.height = 9
+                    # Make shock charts larger
+                    if "shock" in result["title"].lower():
+                        chart.width = 30  # double width
+                        chart.height = 9  # double height
+                    else:
+                        chart.width = 18
+                        chart.height = 9
 
                     data = Reference(ws, min_col=2, min_row=start_row,
                                      max_col=num_cols, max_row=start_row + num_rows)
