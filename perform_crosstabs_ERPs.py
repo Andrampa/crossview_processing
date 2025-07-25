@@ -40,7 +40,7 @@ selected_countries = [
 ]
 
 # selected_countries = [
-#    'COD']
+#    'MMR']
 
 get_updated_list_of_surveys_from_AGOL = True
 dev_mode = False
@@ -114,7 +114,8 @@ shock_label_map = {
     "shock_mvtrestrict": "Movement restrictions",
     "shock_pestoutbreak": "Pest outbreak",
     "shock_theftofprodassets": "Theft of productive assets",
-    "shock_firenatural": "Natural fire"
+    "shock_firenatural": "Natural fire",
+    "shock_violenceinsecconf": "Violence, insecurity or conflict"
 }
 
 export_csv = True
@@ -916,6 +917,51 @@ def query_shocks_trend_adm0_with_averages_and_deviation(adm0_iso3):
         ((merged["latest_value"] - merged["avg_last6rounds"]) / merged["avg_last6rounds"]) * 100
     ).round(1)
 
+    # === Identify remarkable shocks with reasons ===
+    remarkable = []
+
+    # 1. Top 5 by average
+    top_avg = averages.sort_values("avg_last6rounds", ascending=False).head(5)
+    for _, row in top_avg.iterrows():
+        avg = row["avg_last6rounds"]
+        remarkable.append({
+            "indicator": row["indicator"],
+            "reason": f"Among the 5 most common shocks (avg. affected HH over last 6 rounds on Admin 0 level = {avg:.1f}%)"
+        })
+
+
+    # 2. Deviation ≥ 10 pp
+    for _, row in merged.iterrows():
+        if row["deviation"] >= 10:
+            remarkable.append({
+                "indicator": row["indicator"],
+                "reason": f"Significant increase at adm0 level in last round: +{row['deviation']} pp compared to average"
+            })
+
+    # 3. % increase ≥ 30%
+    for _, row in merged.iterrows():
+        if row["percent_change"] >= 30:
+            remarkable.append({
+                "indicator": row["indicator"],
+                "reason": f"Significant increase at adm0 level: +{row['percent_change']}% compared to average"
+            })
+
+    # Group by indicator and summarize reasons
+    from collections import defaultdict
+    remarkable_dict = defaultdict(list)
+    for item in remarkable:
+        remarkable_dict[item["indicator"]].append(item["reason"])
+
+    # Create final output list with label
+    remarkable_shocks = []
+    for indicator, reasons in remarkable_dict.items():
+        label = shock_label_map.get(indicator, indicator.replace("shock_", "").replace("_", " ").capitalize())
+        remarkable_shocks.append({
+            "indicator": indicator,
+            "label": label,
+            "reasons": reasons
+        })
+
     # Filter all outputs to indicators available in the latest round
     averages = averages[averages["indicator"].isin(indicators_in_latest_round)]
     latest_df = latest_df[latest_df["indicator"].isin(indicators_in_latest_round)]
@@ -925,7 +971,105 @@ def query_shocks_trend_adm0_with_averages_and_deviation(adm0_iso3):
     averages_sorted = averages.sort_values("avg_last6rounds", ascending=False).reset_index(drop=True)
     deviations_sorted = merged.sort_values("deviation", ascending=False).reset_index(drop=True)
 
-    return df, averages_sorted, deviations_sorted
+    return df, averages_sorted, deviations_sorted, remarkable_shocks
+
+def generate_remarkable_shocks_maps(remarkable_shocks, adm0_iso3, round_num):
+    import matplotlib.pyplot as plt
+    import matplotlib.colors as mcolors
+    import geopandas as gpd
+    import numpy as np
+    from arcgis.features import FeatureLayer
+    from arcgis.geometry import Geometry
+    import pandas as pd
+
+    # Create output folder
+    out_dir = os.path.join("outputs_for_erps", "shocks_maps")
+    os.makedirs(out_dir, exist_ok=True)
+
+    # Load FeatureLayer and query
+    url = "https://services5.arcgis.com/sjP4Ugu5s0dZWLjd/arcgis/rest/services/diem_adm_repr_1_mview/FeatureServer/29"
+    layer = FeatureLayer(url)
+    where_clause = f"adm0_iso3 = '{adm0_iso3}' AND round = {round_num}"
+    features = layer.query(where=where_clause, out_fields="*", return_geometry=True)
+
+    if not features or not features.features:
+        print(f"[WARN] No data available for {adm0_iso3} R{round_num}")
+        return
+
+    # Convert to GeoDataFrame manually
+    records = []
+    for feat in features.features:
+        attr = feat.attributes
+        geom = feat.geometry
+        if geom:
+            records.append({**attr, "geometry": Geometry(geom).as_shapely})
+
+    if not records:
+        print(f"[SKIP] No geometries found for {adm0_iso3} R{round_num}")
+        return
+
+    gdf = gpd.GeoDataFrame(records, crs="EPSG:4326")
+
+    # Load ADM0 base boundary (as basemap, not in legend)
+    adm0_url = "https://services5.arcgis.com/sjP4Ugu5s0dZWLjd/arcgis/rest/services/Administrative_Boundaries_Reference_(view_layer)/FeatureServer/2"
+    adm0_layer = FeatureLayer(adm0_url)
+    adm0_features = adm0_layer.query(where=f"adm0_iso3 = '{adm0_iso3}'", out_fields="*", return_geometry=True)
+
+    adm0_records = []
+    for feat in adm0_features.features:
+        attr = feat.attributes
+        geom = feat.geometry
+        if geom:
+            adm0_records.append({**attr, "geometry": Geometry(geom).as_shapely})
+
+    adm0_gdf = gpd.GeoDataFrame(adm0_records, crs="EPSG:4326") if adm0_records else None
+
+
+    # Plot each remarkable shock
+    for shock in remarkable_shocks:
+        field = shock["indicator"] + "_1"  # e.g., "shock_flood"
+        label = shock["label"]       # e.g., "Flood"
+
+        if field not in gdf.columns:
+            print(f"[SKIP] Field '{field}' not in layer")
+            continue
+
+        valid_data = gdf[[field]].dropna()
+        if valid_data.empty:
+            print(f"[SKIP] No valid data for '{field}'")
+            continue
+
+        values = valid_data[field].dropna().values
+
+        if len(values) < 2 or np.nanmin(values) == np.nanmax(values):
+            print(f"[SKIP] Cannot plot '{field}': not enough variation (min = max = {np.nanmin(values)})")
+            continue
+
+        quintiles = np.nanpercentile(values, [0, 20, 40, 60, 80, 100])
+        if not np.all(np.isfinite(quintiles)) or np.unique(quintiles).size < 2:
+            print(f"[SKIP] Invalid quintile boundaries for '{field}'")
+            continue
+
+        cmap = plt.get_cmap("YlOrRd")
+        norm = mcolors.BoundaryNorm(quintiles, cmap.N, clip=True)
+
+
+        fig, ax = plt.subplots(1, 1, figsize=(10, 8))
+        # Plot ADM0 boundary first (gray background)
+        if adm0_gdf is not None:
+            adm0_gdf.boundary.plot(ax=ax, linewidth=0.8, edgecolor='lightgray')
+
+        # Plot shock data on top
+        gdf.plot(column=field, cmap=cmap, linewidth=0.3, ax=ax, edgecolor='gray', norm=norm, legend=True)
+
+        ax.set_title(f"Percentage of population reporting {label} – {adm0_iso3} R{round_num}", fontsize=14)
+        ax.axis("off")
+
+        filename = f"{adm0_iso3}_{round_num}_{field}.png"
+        out_path = os.path.join(out_dir, filename)
+        plt.tight_layout()
+        plt.savefig(out_path, dpi=300)
+        plt.close()
 
 
 
@@ -1034,7 +1178,7 @@ for survey in survey_list:
         failed_icp_floods.append(adm0_iso3)
 
     print('Shocks trends and deviations')
-    df_trend, df_avg6, df_dev = query_shocks_trend_adm0_with_averages_and_deviation(adm0_iso3)
+    df_trend, df_avg6, df_dev, remarkable_shocks = query_shocks_trend_adm0_with_averages_and_deviation(adm0_iso3)
 
     if not df_avg6.empty:
         df_fixed = df_avg6.rename(columns={"indicator": "Shock", "avg_last6rounds": "Weighted % of HH"}).sort_values(
@@ -1088,6 +1232,8 @@ for survey in survey_list:
             "metadata": f"{adm0_name} – DIEM data, last round: {df_dev['latest_round'].max()}",
             "df": df_percent
         })
+
+    generate_remarkable_shocks_maps(remarkable_shocks, adm0_iso3, round_num)
 
     if export_csv:
         from openpyxl import Workbook
@@ -1217,7 +1363,6 @@ for survey in survey_list:
 
             # Write table (full-length labels)
             table_cols = list(df.columns[:-1])  # exclude chart_labels_col
-            print(df[table_cols])
 
             if "shocks" in result['title'].lower():
                 # Write header
@@ -1364,6 +1509,78 @@ for survey in survey_list:
                     else:
                         current_row = chart_row - 10
 
+
+        # === Add sheet with subnational shock maps ===
+        ws_maps = wb.create_sheet(title="Remarkable shocks maps")
+        row_idx = 1
+
+        # Title
+        ws_maps.cell(row=row_idx, column=1, value=f"Subnational maps of remarkable shocks for round {round_num}")
+        ws_maps.cell(row=row_idx, column=1).font = Font(size=14, bold=True)
+        row_idx += 2
+
+        shock_map_dir = os.path.join("outputs_for_erps", "shocks_maps")
+
+        for shock in remarkable_shocks:
+            indicator = shock["indicator"]
+            label = shock["label"]
+            reasons = shock["reasons"]
+            shock_field = indicator + "_1"
+            map_filename = f"{adm0_iso3}_{round_num}_{shock_field}.png"
+            map_path = os.path.join(shock_map_dir, map_filename)
+
+            # Title of the shock
+            ws_maps.cell(row=row_idx, column=1, value=f"{label}")
+            ws_maps.cell(row=row_idx, column=1).font = Font(bold=True)
+            row_idx += 1
+
+            # Reasons
+            for reason in reasons:
+                ws_maps.cell(row=row_idx, column=1, value=f"- {reason}")
+                row_idx += 1
+
+            # Insert map if available
+            if os.path.exists(map_path):
+                try:
+                    img = ExcelImage(map_path)
+                    with PILImage.open(map_path) as pil_img:
+                        orig_w, orig_h = pil_img.size
+
+                    max_width = 600
+                    if orig_w > max_width:
+                        scale_factor = max_width / orig_w
+                        img.width = int(orig_w * scale_factor)
+                        img.height = int(orig_h * scale_factor)
+                    else:
+                        img.width = orig_w
+                        img.height = orig_h
+
+                    ws_maps.add_image(img, f"A{row_idx}")
+                    row_idx += int(img.height / 20) + 5
+                except Exception as e:
+                    print(f"Error adding image for {label}: {e}")
+            else:
+                ws_maps.cell(row=row_idx, column=1, value="Map not available.")
+                row_idx += 2
+
+        # Add explanation of classification
+        ws_maps.cell(row=row_idx, column=1, value="Classification method:")
+        ws_maps.cell(row=row_idx, column=1).font = Font(bold=True)
+        row_idx += 1
+
+        classification_note = (
+            "The shock indicator maps use a quintile classification scheme, which divides the observed values into five equally sized groups "
+            "(0–20th, 20–40th, 40–60th, 60–80th, 80–100th percentiles). This approach highlights relative differences across subnational units "
+            "within each country and round, ensuring that variation is visible even when values are concentrated within narrow ranges."
+        )
+
+        from textwrap import wrap
+        for line in wrap(classification_note, width=110):
+            ws_maps.cell(row=row_idx, column=1, value=line)
+            row_idx += 1
+
+
+
         # Add sheet with methodology text for the current survey
         ws_method = wb.create_sheet(title="DIEM Survey methodology")
 
@@ -1393,6 +1610,7 @@ for survey in survey_list:
 
         # Define path inside the subdirectory
         output_path = os.path.join(output_dir, f"DIEM_survey_analysis_ERPs_202507_{adm0_iso3}_{round_num}.xlsx")
+
 
         wb.save(output_path)
         print(f"\nExported grouped analysis with adaptive chart layout to: {output_path}")
