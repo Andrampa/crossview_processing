@@ -1,3 +1,49 @@
+"""
+DIEM ERP Reporting Automation Script
+Last updated: July 2025
+
+Overview:
+This script automates the production of analysis reports for Emergency Response Planning (ERP) using DIEM household survey microdata. It generates Excel files that include summaries, charts, and visualizations per country and round, tailored for operational use by humanitarian actors.
+
+Key functionalities:
+1. **Survey metadata and microdata loading**:
+   - Loads a local CSV file containing the entire DIEM microdata dataset previously downloaded from the Hub.
+   - Retrieves survey metadata (e.g. country name, round number, collection date, methodology) from the Monitoring System configuration, published as a Feature Service on AGOL.
+
+2. **Microdata filtering and analysis**:
+   - Filters the microdata by country and round.
+   - Calculates weighted FIES prevalence by residency and agricultural dependency (simplified and detailed).
+   - Analyzes reported needs in the *previous* round and assistance received in the *current* round.
+   - Computes satisfaction with assistance and compares needs vs assistance coverage.
+
+3. **Shock trend analysis**:
+   - Queries admin0-level shock time series from AGOL.
+   - Computes average shock prevalence over the last 6 rounds and compares it to the latest round.
+   - Identifies *remarkable shocks* based on prevalence, deviation (in percentage points), and relative change.
+   - Automatically generates and includes subnational maps of remarkable shocks in the Excel report.
+
+4. **Flood exposure and IPC overlay**:
+   - Loads flood exposure and IPC/CH Phase data from a local Excel file named `IPC_multicountry_20250707.xlsx`, manually compiled by the Hub team.
+   - Filters for adm2 areas classified in IPC/CH Phase 3+ and ranks the top 10 units by cropland exposed to floods.
+
+5. **Excel report generation**:
+   - Produces a multi-sheet Excel file for each country-round, including:
+     - Analysis tables and charts with adaptive formatting
+     - Subnational maps of shocks
+     - Survey methodology text (cleaned and wrapped)
+     - A summary sheet with coverage map if available
+   - Coverage comparison maps between IPC and DIEM are generated in advance by running a separate script: `compare_DIEM_and_ICPCH_coverages.py`. These maps must be created before running the current script.
+   - Exports a separate Excel file summarizing the latest validated survey rounds across all countries.
+
+Notes:
+- Survey metadata is cached locally for reuse.
+- Charts and outputs adapt dynamically based on input data.
+- This script is used as part of DIEM’s internal workflow to generate ERP-ready country briefs from validated household survey data.
+
+Dependencies: pandas, numpy, matplotlib, geopandas, arcgis, openpyxl, PIL
+"""
+
+
 import pandas as pd
 import json, os, re, glob, requests
 from arcgis.gis import GIS
