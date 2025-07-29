@@ -60,7 +60,7 @@ survey_details = [['AFG',  10,  'All 34 Province are covered',  'Afghanistan',  
  ['MOZ',  7,  '9 Provinces covered out of 11',  'Mozambique',  'Target: Rural population'], ['MWI',  1,  '28 Districts covered out of 32',  'Malawi',  'Target: Agricultural population'],
 ['NER',  10,  '7 Regions covered out of 8',  'Niger',  'Target: Rural population'], ['NGA',  8,  '3 States covered out of 37',  'Nigeria',  'Target: Rural population'],
  ['PAK',  6,  '25 District covered out of 161',  'Pakistan',  'Target: Rural population'], ['PSE',  1,  '9 Governorates covered out of 14',  'Palestine',  'Target: Agricultural population'],
- ['TCD',  8,  '19 Departement covered out of 70',  'Chad',  'Target: Rural population'], ['YEM',  28,  'All 22 Governorates are covered',  'Yemen',  'Target: Entire population'],
+ ['TCD',  8,  '19 Departement covered out of 70',  'Chad',  'Target: Rural population'], ['YEM',  29,  'All 22 Governorates are covered',  'Yemen',  'Target: Entire population'],
  ['ZWE',  10,  '8 Province covered out of 10',  'Zimbabwe',  'Target: Rural population']]
 
 countries_ipc_json = ["AFG", "BGD", "CAF", "COD", "SLV", "HTI", "LBN", "MOZ", "YEM", "PAK", "MWI", "ZWE"]

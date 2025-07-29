@@ -40,10 +40,14 @@ selected_countries = [
 ]
 
 # selected_countries = [
-#    'MMR']
+#    'YEM']
 
 get_updated_list_of_surveys_from_AGOL = True
 dev_mode = False
+
+# Create the output directory if it does not exist
+output_dir = "outputs_for_erps"
+os.makedirs(output_dir, exist_ok=True)
 
 if not get_updated_list_of_surveys_from_AGOL:
     print("Getting updated_list_of_surveys_from cache")
@@ -84,6 +88,35 @@ else:
     # Save survey list to cache file
     with open(survey_list_cache_path, "w", encoding="utf-8") as f:
         json.dump(survey_list, f, indent=2, default=str)
+
+
+    # Export to Excel file THE RECAP ON COVERAGE AND METHODOLOGY
+    excel_columns = [
+        "adm0_iso3",
+        "adm0_name",
+        "round",
+        "coll_end_date",
+        "diem_target_pop",
+        "diem_survey_coverage",
+        "methodology"
+    ]
+
+    latest_rounds["coll_end_date"] = pd.to_datetime(latest_rounds["coll_end_date"], errors="coerce").dt.strftime(
+        "%b %Y")
+
+    # Ensure all selected columns are present and ordered
+    export_df = latest_rounds.rename(columns={
+        "round": "round",  # Keep name consistent
+        "coll_end_date": "coll_end_date",
+        "methodology": "methodology"
+    })[excel_columns]
+
+    # Define path inside the subdirectory
+    output_excel_path = os.path.join(output_dir, f"DIEM_latest_surveys_coverage_and_methodology.xlsx")
+
+    # Save to Excel
+    export_df.to_excel(output_excel_path, index=False)
+    print(f"Excel file exported: {output_excel_path}")
 
 
 # Show all columns and full width when printing DataFrames
@@ -1081,7 +1114,7 @@ def generate_remarkable_shocks_maps(remarkable_shocks, adm0_iso3, round_num):
 if dev_mode:
     csv_path = r"C:\git\crossview_processing\DIEM_micro20250703_CODR9.csv"
 else:
-    csv_path = r"C:\git\crossview_processing\DIEM_micro20250723.csv"
+    csv_path = r"C:\git\crossview_processing\DIEM_micro20250729.csv"
 
 columns_to_use = [
     "adm0_iso3", "adm0_name", "round", "weight_final", "p_mod", "p_sev",
@@ -1191,6 +1224,10 @@ for survey in survey_list:
         # Rounds metadata logic
         round_min = df_trend['round'].min()
         round_max = df_trend['round'].max()
+        round_min_date = df_trend['coll_end_date'].min()
+        round_max_date = df_trend['coll_end_date'].max()
+        round_max_date_str = round_max_date.strftime("%b %Y")
+        round_min_date_str = round_min_date.strftime("%b %Y")
         round_diff = round_max - round_min + 1  # inclusive
         if round_diff > 6:
             title_rounds = 6
@@ -1201,7 +1238,7 @@ for survey in survey_list:
 
         result_dfs.append({
             "title": f"Most frequent shocks – average over last {title_rounds} rounds",
-            "metadata": f"{adm0_name} – DIEM data, rounds {metadata_start} to {round_max}",
+            "metadata": f"{adm0_name} – DIEM data, rounds {metadata_start} to {round_max} ({round_min_date_str} to {round_max_date_str}) ",
             "df": df_fixed
         })
 
@@ -1603,10 +1640,6 @@ for survey in survey_list:
         # Write each line to the Excel sheet
         for i, line in enumerate(wrapped_text.split('\n'), start=3):
             ws_method.cell(row=i, column=1, value=line)
-
-        # Create the output directory if it does not exist
-        output_dir = "outputs_for_erps"
-        os.makedirs(output_dir, exist_ok=True)
 
         # Define path inside the subdirectory
         output_path = os.path.join(output_dir, f"DIEM_survey_analysis_ERPs_202507_{adm0_iso3}_{round_num}.xlsx")
